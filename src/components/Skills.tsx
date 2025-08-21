@@ -31,7 +31,7 @@ const Skills: React.FC = () => {
     },
     {
       category: 'AI & Data Science',
-      skills: ['Computer Vision', 'PyTorch', 'TensorFlow', 'Pandas', 'LLM & Prompt Engineering'],
+      skills: ['Computer Vision', 'LLM & Prompt Engineering', 'PyTorch', 'TensorFlow', 'Pandas', 'MatPlotLib', 'Scikit-Learn'],
       bgColor: 'bg-green-100',
       borderColor: 'border-green-300',
       skillBgColor: 'bg-green-200',
