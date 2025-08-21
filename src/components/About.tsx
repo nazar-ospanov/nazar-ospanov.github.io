@@ -11,10 +11,7 @@ const About: React.FC = () => {
             <h3 className="text-xl font-semibold text-gray-900 mb-4">Background</h3>
             <p className="text-gray-600 leading-relaxed mb-6">
               I'm currently a Computer Science student at UC Berkeley with a 4.0 GPA, 
-              where I focus on computer security, machine learning, and backend engineering. 
-              My journey in computer science began with math olympiads, but after missing a few 
-              negative signs one too many times, I realized that computers do a better job at 
-              calculations than I do.
+              where I focus on computer security, machine learning, and backend engineering.
             </p>
             
             <p className="text-gray-600 leading-relaxed">
