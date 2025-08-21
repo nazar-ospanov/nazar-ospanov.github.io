@@ -7,7 +7,7 @@ const Projects: React.FC = () => {
       description: 'Developed an AI-driven web accessibility platform using React, Express, AWS, and MongoDB, enabling automated WCAG-based grading and feedback to promote awareness of visual accessibility and inclusive design.',
       image: '/aina-project.png',
       technologies: ['React', 'Express', 'MongoDB', 'AI', 'WCAG'],
-      github: 'https://github.com/aimogeniusOfficial/sfhacks_frontend',
+      github: 'https://github.com/nazar-ospanov/sfhacks_frontend',
       live: 'https://youtu.be/2UhWo3-CXU0',
       featured: true,
       academicProject: false
@@ -17,7 +17,7 @@ const Projects: React.FC = () => {
       description: 'Built a club discovery platform for UC Berkeley students. Integrated Supabase for real-time database management and user authentication, enabling students to discover, join, and manage campus clubs.',
       image: '/clubhub-project.jpg',
       technologies: ['React', 'TypeScript', 'Vite', 'Supabase'],
-      github: 'https://github.com/aimogeniusOfficial/clubhub-web',
+      github: 'https://github.com/nazar-ospanov/clubhub-web',
       live: null,
       featured: true,
       academicProject: false
@@ -147,7 +147,7 @@ const Projects: React.FC = () => {
         
         <div className="text-center mt-12">
           <a
-            href="https://github.com/aimogeniusOfficial"
+            href="https://github.com/nazar-ospanov"
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center px-6 py-3 border border-gray-300 text-gray-700 bg-white rounded-lg hover:bg-gray-50 transition-colors"
