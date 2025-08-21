@@ -3,14 +3,31 @@ import React from 'react';
 const Projects: React.FC = () => {
   const projects = [
     {
+      title: 'NYT.tv: TV OS App for Video Content',
+      description: 'Created a TV OS app for video material for the New York Times. Contributed on the backend side by creating GraphQL queries to fetch relevant content across multiple NYT products.',
+      image: '/nyt-project-logo.jpeg',
+      technologies: ['GraphQL', 'Backend', 'TV OS', 'Swift'],
+      github: null,
+      live: null,
+      label: 'NYT Maker Week'
+    },
+    {
+      title: 'NYT Onboarding Bot: AI-Powered Employee Onboarding',
+      description: 'Created an onboarding ChatGPT UI for onboarding new employees. Developed an MCP pipeline for retrieving relevant knowledge by department to enhance the onboarding experience.',
+      image: '/nyt-project-logo.jpeg',
+      technologies: ['MCP', 'LLMs', 'RAGs', 'AI', 'Backend'],
+      github: null,
+      live: null,
+      label: 'NYT Maker Week'
+    },
+    {
       title: 'AIna: Web Accessibility Platform',
       description: 'Developed an AI-driven web accessibility platform using React, Express, AWS, and MongoDB, enabling automated WCAG-based grading and feedback to promote awareness of visual accessibility and inclusive design.',
       image: '/aina-project.png',
       technologies: ['React', 'Express', 'MongoDB', 'AI', 'WCAG'],
       github: 'https://github.com/nazar-ospanov/sfhacks_frontend',
       live: 'https://youtu.be/2UhWo3-CXU0',
-      featured: true,
-      academicProject: false
+      label: 'Hackathon'
     },
     {
       title: 'ClubHub: UC Berkeley Club Discovery Platform',
@@ -19,8 +36,7 @@ const Projects: React.FC = () => {
       technologies: ['React', 'TypeScript', 'Vite', 'Supabase'],
       github: 'https://github.com/nazar-ospanov/clubhub-web',
       live: null,
-      featured: true,
-      academicProject: false
+      label: 'Hackathon'
     },
     {
       title: 'Secure File Sharing System',
@@ -29,8 +45,7 @@ const Projects: React.FC = () => {
       technologies: ['Go', 'Encryption', 'MACs', 'Digital Signatures', 'RSA', 'Hybrid Encryption', 'Computer Security'],
       github: null,
       live: null,
-      featured: false,
-      academicProject: true
+      label: 'School'
     }
   ];
 
@@ -44,7 +59,9 @@ const Projects: React.FC = () => {
             <div 
               key={index} 
               className={`bg-white rounded-lg shadow-md overflow-hidden hover:shadow-xl transition-shadow duration-300 ${
-                project.featured ? 'ring-2 ring-blue-500' : ''
+                project.label === 'NYT Maker Week' ? 'ring-2 ring-purple-500' : 
+                project.label === 'Hackathon' ? 'ring-2 ring-blue-500' : 
+                project.label === 'School' ? 'ring-2 ring-green-500' : ''
               }`}
             >
               {/* Project Image */}
@@ -74,11 +91,15 @@ const Projects: React.FC = () => {
               
               {/* Project Content */}
               <div className="p-6">
-                {/* Consistent height area for featured badge */}
+                {/* Consistent height area for label badge */}
                 <div className="h-8 mb-3 flex items-center">
-                  {project.featured && (
-                    <span className="inline-block bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full">
-                      Featured
+                  {project.label && (
+                    <span className={`inline-block text-xs px-2 py-1 rounded-full ${
+                      project.label === 'NYT Maker Week' ? 'bg-purple-100 text-purple-800' :
+                      project.label === 'Hackathon' ? 'bg-blue-100 text-blue-800' :
+                      project.label === 'School' ? 'bg-green-100 text-green-800' : ''
+                    }`}>
+                      {project.label}
                     </span>
                   )}
                 </div>
@@ -118,10 +139,14 @@ const Projects: React.FC = () => {
                         GitHub
                       </button>
                       
-                      {/* Tooltip for academic integrity */}
+                      {/* Tooltip for different reasons */}
                       <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-gray-900 text-white text-sm rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-10 max-w-48">
                         <div className="text-center">
-                          <div className="text-gray-300 text-xs leading-relaxed">Cannot share due to UC Berkeley academic integrity policies</div>
+                          <div className="text-gray-300 text-xs leading-relaxed">
+                            {project.label === 'NYT Maker Week' ? 'Cannot share due to NYT confidentiality policies' :
+                             project.label === 'School' ? 'Cannot share due to UC Berkeley academic integrity policies' :
+                             'GitHub link unavailable'}
+                          </div>
                         </div>
                         {/* Tooltip arrow */}
                         <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900"></div>
