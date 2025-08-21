@@ -3,16 +3,6 @@ import React from 'react';
 const Education: React.FC = () => {
   const courseCategories = [
     {
-      name: 'Machine Learning',
-      courses: [
-        { name: 'Machine Learning', code: 'CS 189', grade: 'A' },
-        { name: 'Deep Learning', code: 'CS 182', grade: 'in progress' },
-        { name: 'Optimization Models', code: 'EECS 127', grade: 'in progress' }
-      ],
-      bgColor: 'bg-purple-100',
-      textColor: 'text-purple-800'
-    },
-    {
       name: 'Systems',
       courses: [
         { name: 'Computer Security', code: 'CS 161', grade: 'A+' },
@@ -21,6 +11,16 @@ const Education: React.FC = () => {
       ],
       bgColor: 'bg-blue-100',
       textColor: 'text-blue-800'
+    },
+    {
+      name: 'Machine Learning',
+      courses: [
+        { name: 'Machine Learning', code: 'CS 189', grade: 'A' },
+        { name: 'Deep Learning', code: 'CS 182', grade: 'in progress' },
+        { name: 'Optimization Models', code: 'EECS 127', grade: 'in progress' }
+      ],
+      bgColor: 'bg-purple-100',
+      textColor: 'text-purple-800'
     },
     {
       name: 'Algorithms & Data',

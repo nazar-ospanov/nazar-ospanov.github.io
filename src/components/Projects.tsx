@@ -9,7 +9,28 @@ const Projects: React.FC = () => {
       technologies: ['GraphQL', 'Backend', 'TV OS', 'Swift'],
       github: null,
       live: null,
+      liveButtonText: null,
       label: 'NYT Maker Week'
+    },
+    {
+      title: 'AIna: Web Accessibility Platform',
+      description: 'Developed an AI-driven web accessibility platform using React, Express, and MongoDB, enabling automated WCAG-based grading and feedback to promote awareness of inclusive design.',
+      image: '/aina-project.png',
+      technologies: ['React', 'Express', 'MongoDB', 'AI', 'WCAG'],
+      github: 'https://github.com/nazar-ospanov/sfhacks_frontend',
+      live: 'https://youtu.be/2UhWo3-CXU0',
+      liveButtonText: 'Live Demo',
+      label: 'Hackathon'
+    },
+    {
+      title: 'CIFAR-10 Transfer Learning',
+      description: 'Implemented transfer learning for image classification using pretrained ResNet-50 on CIFAR-10 dataset. I freezed layers, fine-tuned with custom MLP classifiers, and achieved 97% accuracy with under 3M trainable parameters.',
+      image: '/cs161-logo.png',
+      technologies: ['PyTorch', 'Transfer Learning', 'Computer Vision'],
+      github: null,
+      live: 'https://www.kaggle.com/competitions/cs-189-hw-6-cifar-spring-2025/leaderboard',
+      liveButtonText: 'Kaggle Results',
+      label: 'School'
     },
     {
       title: 'NYT Onboarding Bot: AI-Powered Employee Onboarding',
@@ -18,35 +39,29 @@ const Projects: React.FC = () => {
       technologies: ['MCP', 'LLMs', 'RAGs', 'AI', 'Backend'],
       github: null,
       live: null,
+      liveButtonText: null,
       label: 'NYT Maker Week'
     },
     {
-      title: 'AIna: Web Accessibility Platform',
-      description: 'Developed an AI-driven web accessibility platform using React, Express, AWS, and MongoDB, enabling automated WCAG-based grading and feedback to promote awareness of visual accessibility and inclusive design.',
-      image: '/aina-project.png',
-      technologies: ['React', 'Express', 'MongoDB', 'AI', 'WCAG'],
-      github: 'https://github.com/nazar-ospanov/sfhacks_frontend',
-      live: 'https://youtu.be/2UhWo3-CXU0',
-      label: 'Hackathon'
-    },
-    {
       title: 'ClubHub: UC Berkeley Club Discovery Platform',
-      description: 'Built a club discovery platform for UC Berkeley students. Integrated Supabase for real-time database management and user authentication, enabling students to discover, join, and manage campus clubs.',
+      description: 'Built a club discovery platform for UC Berkeley students. Integrated Supabase for real-time database management and user auth, enabling students to discover, join, and manage campus clubs.',
       image: '/clubhub-project.jpg',
       technologies: ['React', 'TypeScript', 'Vite', 'Supabase'],
       github: 'https://github.com/nazar-ospanov/clubhub-web',
       live: null,
+      liveButtonText: null,
       label: 'Hackathon'
     },
     {
       title: 'Secure File Sharing System',
-      description: 'Developed a fully secure file-sharing system in Go with the ability to detect 72% of attacks on a vulnerable database using Symmetric/Asymmetric/Hybrid encryption, MACs, Digital Signatures, and others.',
+      description: 'Developed a secure file-sharing system in Go with the ability to detect 72% of attacks on a vulnerable database using Symmetric/Asymmetric/Hybrid encryption, MACs, Digital Signatures, etc.',
       image: '/cs161-logo.png',
       technologies: ['Go', 'Encryption', 'MACs', 'Digital Signatures', 'RSA', 'Hybrid Encryption', 'Computer Security'],
       github: null,
       live: null,
+      liveButtonText: null,
       label: 'School'
-    }
+    },
   ];
 
   return (
@@ -161,7 +176,7 @@ const Projects: React.FC = () => {
                       rel="noopener noreferrer"
                       className="flex-1 bg-blue-600 text-white text-center py-2 px-4 rounded hover:bg-blue-700 transition-colors text-sm"
                     >
-                      Live Demo
+                      {project.liveButtonText || 'Live Demo'}
                     </a>
                   )}
                 </div>
