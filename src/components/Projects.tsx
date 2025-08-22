@@ -25,7 +25,7 @@ const Projects: React.FC = () => {
     {
       title: 'CIFAR-10 Transfer Learning',
       description: 'Implemented transfer learning for image classification using pretrained ResNet-50 on CIFAR-10 dataset. I freezed layers, fine-tuned with custom MLP classifiers, and achieved 97% accuracy with under 3M trainable parameters.',
-      image: '/cs161-logo.png',
+      image: '/cifar-project-logo.png',
       technologies: ['PyTorch', 'Transfer Learning', 'Computer Vision'],
       github: null,
       live: 'https://www.kaggle.com/competitions/cs-189-hw-6-cifar-spring-2025/leaderboard',
