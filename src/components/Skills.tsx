@@ -13,7 +13,7 @@ const Skills: React.FC = () => {
     },
     {
       category: 'Backend & Infrastructure',
-      skills: ['Flask', 'Fiber', 'PostgreSQL', 'GCP', 'AWS', 'Kubernetes', 'Docker', "REST", "GraphQL"],
+      skills: ["REST", "GraphQL", "FastAPI", "Fiber", "PostgreSQL", "GCP", "AWS", "Kubernetes", "Docker", "Terraform", "OpenTelemetry"],
       bgColor: 'bg-purple-100',
       borderColor: 'border-purple-300',
       skillBgColor: 'bg-purple-200',
