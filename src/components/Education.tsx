@@ -5,9 +5,11 @@ const Education: React.FC = () => {
     {
       name: 'Systems',
       courses: [
+        { name: 'Operating Systems', code: 'CS 162', grade: 'A' },
         { name: 'Computer Security', code: 'CS 161', grade: 'A+' },
-        { name: 'Operating Systems', code: 'CS 162', grade: 'in progress' },
-        { name: 'Computer Architecture', code: 'CS 61C', grade: 'A' }
+        { name: 'Introduction to Internet', code: 'CS 168', grade: 'in progress' },
+        { name: 'Computer Engineering', code: 'CS 152', grade: 'in progress' },
+        { name: 'Computer Architecture', code: 'CS 61C', grade: 'A' },
       ],
       bgColor: 'bg-blue-100',
       textColor: 'text-blue-800'
@@ -16,8 +18,11 @@ const Education: React.FC = () => {
       name: 'Machine Learning',
       courses: [
         { name: 'Machine Learning', code: 'CS 189', grade: 'A' },
-        { name: 'Deep Learning', code: 'CS 182', grade: 'in progress' },
-        { name: 'Optimization Models', code: 'EECS 127', grade: 'in progress' }
+        { name: 'Deep Learning', code: 'CS 182', grade: 'P' },
+        { name: 'Optimization Models', code: 'EECS 127', grade: 'A+' },
+        { name: 'Agentic AI', code: 'CS 194', grade: 'A' },
+        { name: 'Reinforcement Learning', code: 'CS 185', grade: 'in progress'},
+        { name: 'Scalable AI', code: 'EECS 194', grade: 'in progress' },
       ],
       bgColor: 'bg-purple-100',
       textColor: 'text-purple-800'
@@ -48,7 +53,7 @@ const Education: React.FC = () => {
               <div className="border-l-4 border-blue-600 pl-6 py-2">
                 <h4 className="text-lg font-medium text-gray-900">B.A. in Computer Science</h4>
                 <p className="text-gray-600">University of California, Berkeley</p>
-                <p className="text-sm text-gray-500">Expected Graduation: Dec 2026</p>
+                <p className="text-sm text-gray-500">Expected Graduation: May 2026</p>
                 <p className="text-sm text-gray-500">GPA: 4.0/4.0</p>
               </div>
             </div>
@@ -58,16 +63,25 @@ const Education: React.FC = () => {
               <h3 className="text-xl font-semibold text-gray-900 mb-4">Academic Employment</h3>
               <div className="space-y-4">
                 <div className="relative">
-                  <div className="absolute left-3 top-0 w-3 h-3 bg-blue-600 rounded-full"></div>
+                  <div className="absolute left-3 top-1.5 w-3 h-3 bg-blue-600 rounded-full"></div>
                   <div className="ml-8">
-                    <h4 className="font-medium text-gray-900">CS 161 Tutor (Computer Security)</h4>
+                    <h4 className="font-medium text-gray-900">CS 189 Course Staff (Machine Learning)</h4>
+                    <p className="text-gray-600">UC Berkeley</p>
+                    <p className="text-sm text-gray-500">Spring 2026</p>
+                  </div>
+                </div>
+
+                <div className="relative">
+                  <div className="absolute left-3 top-1.5 w-3 h-3 bg-gray-400 rounded-full"></div>
+                  <div className="ml-8">
+                    <h4 className="font-medium text-gray-900">CS 161 Course Staff (Computer Security)</h4>
                     <p className="text-gray-600">UC Berkeley</p>
                     <p className="text-sm text-gray-500">Fall 2025</p>
                   </div>
                 </div>
                 
                 <div className="relative">
-                  <div className="absolute left-3 top-0 w-3 h-3 bg-gray-400 rounded-full"></div>
+                  <div className="absolute left-3 top-1.5 w-3 h-3 bg-gray-400 rounded-full"></div>
                   <div className="ml-8">
                     <h4 className="font-medium text-gray-900">CS 61B Academic Intern (Data Structures)</h4>
                     <p className="text-gray-600">UC Berkeley</p>
