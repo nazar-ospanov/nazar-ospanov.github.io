@@ -434,7 +434,7 @@
       long-context retrieval (RULER@128K), matching FP16 accuracy
       <em>exactly</em> across all 3 seeds at 3.98 bits/element.</li>
       <li><strong>Beats every static substrate on a tool-use agent.</strong>
-      On τ-Bench retail, EchoKV-3C lands at 0.236 accuracy at 7.95 bits —
+      On τ-Bench retail, EchoKV lands at 0.236 accuracy at 7.95 bits —
       above FP16 (0.217), INT8 (0.183), and INT4 (0.200) — using the
       same controller, same τ, same code as RULER.</li>
     </ul>
@@ -931,7 +931,7 @@
       <p>All measurements use the same physical host and the same
       pinned software stack. The only thing that changes between cells
       is the KV-cache substrate (FP16 / static INT4 / static INT8 /
-      EchoKV-3C); prompts, decoding parameters, and random seeds are
+      EchoKV); prompts, decoding parameters, and random seeds are
       paired across substrates.</p>
       <ul>
         <li><strong>Model:</strong> Llama-3.1-70B-Instruct (FP16
@@ -1084,7 +1084,7 @@
 
   <p>Each colored trace below is one workload, shown as its own
   horizontal row. Markers along each row sit at the bit-widths of the
-  four substrates (FP16, INT4, INT8, EchoKV-3C). <strong>Left = less
+  four substrates (FP16, INT4, INT8, EchoKV). <strong>Left = less
   memory.</strong> The bit-width EchoKV actually chose for that
   workload is shown on the right.</p>
 
@@ -1158,7 +1158,7 @@
   summarization request may be the layer that breaks a 50-turn
   τ-bench retail agent.</p>
 
-  <p>EchoKV-3C inverts that contract. The bit-width assignment is
+  <p>EchoKV inverts that contract. The bit-width assignment is
   decided <em>at serving time</em>, per layer, from the live KL signal
   the canary measures. The same deployment that runs at near-uniform
   INT4 on RULER@128K cascades to near-uniform INT8 on τ-bench retail
@@ -1274,7 +1274,7 @@
 
   <h2>Code &amp; reproducing</h2>
 
-  <p>Everything in this post — the EchoKV-3C controller, the canary
+  <p>Everything in this post — the EchoKV controller, the canary
   estimator, the per-workload multi-seed scripts, the INT8 paired
   baseline scripts, and the raw aggregate JSONs — lives in our public
   repository:</p>
@@ -1289,7 +1289,7 @@
       <p>Each workload has one tmux-launchable script under
       <code>scripts/</code> that runs the full three-seed paired
       protocol with all four substrates (FP16, static INT2, static
-      INT4, static INT8, EchoKV-3C) on identical prompts and writes
+      INT4, static INT8, EchoKV) on identical prompts and writes
       an <code>aggregate.json</code> with paired McNemar comparisons.
       Each script is self-contained — there's no separate INT8 or
       INT2 chain to run.</p>
@@ -1302,7 +1302,7 @@ cd echokv
 conda activate echokv
 
 <span class="c"># 3. reproduce each workload — every script runs the full</span>
-<span class="c">#    FP16 / INT2 / INT4 / INT8 / EchoKV-3C sweep across 3 seeds</span>
+<span class="c">#    FP16 / INT2 / INT4 / INT8 / EchoKV sweep across 3 seeds</span>
 bash scripts/22_section63_emulation_multiseed.sh    <span class="c"># GSM8K-Hard</span>
 bash scripts/23_section64_hotpotqa_multiseed.sh     <span class="c"># HotpotQA</span>
 bash scripts/24_section65_ruler128k_multiseed.sh    <span class="c"># RULER@128K, τ=0.124</span>
@@ -2285,7 +2285,7 @@ const WORKLOAD_NOTES = {
    ========================================================================= */
 (function () {
   const TIER_COLORS = {fp16: "#444", int2: "#d62728", int4: "#1f77b4", int8: "#ff7f0e", echokv: "#2ca02c"};
-  const LABEL = {fp16: "FP16 (16 bits)", int2: "static INT2 (2 bits)", int4: "static INT4 (4 bits)", int8: "static INT8 (8 bits)", echokv: "EchoKV-3C (adaptive)"};
+  const LABEL = {fp16: "FP16 (16 bits)", int2: "static INT2 (2 bits)", int4: "static INT4 (4 bits)", int8: "static INT8 (8 bits)", echokv: "EchoKV (adaptive)"};
 
   function workloadOrder() { return ["gsm8k_hard", "hotpotqa", "ruler_128k", "taubench_airline", "taubench_retail"]; }
 
@@ -2421,7 +2421,7 @@ const WORKLOAD_NOTES = {
             : p.c === "int2"   ? "INT2"
             : p.c === "int4"   ? "INT4"
             : p.c === "int8"   ? "INT8"
-            : "EchoKV-3C",
+            : "EchoKV",
         showarrow: false,
         font: {size: 11, family: "Inter, sans-serif", color: TIER_COLORS[p.c]}
       };
@@ -2588,7 +2588,7 @@ const WORKLOAD_NOTES = {
       annotations: [
         ...rowLabels,
         {xref: "paper", yref: "paper", x: 0, y: -0.20, xanchor: "left", yanchor: "top",
-         text: "● INT4  ■ INT8  ◆ FP16  ★ EchoKV-3C", showarrow: false,
+         text: "● INT4  ■ INT8  ◆ FP16  ★ EchoKV", showarrow: false,
          font: {size: 12, family: "Inter, sans-serif", color: "#555"}}
       ]
     }, {displaylogo: false, responsive: true, modeBarButtonsToRemove: ["lasso2d","select2d","autoScale2d"]});
