@@ -1,0 +1,2663 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>EchoKV — Watching a language model decide its own precision</title>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" />
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {delimiters: [
+          {left: '$$', right: '$$', display: true},
+          {left: '$', right: '$', display: false}
+        ], throwOnError: false});"></script>
+<style>
+  :root {
+    --ink: #1a1a1a;
+    --muted: #5a5a5a;
+    --accent: #0036b5;
+    --rule: #e4e4e4;
+    --code-bg: #f7f7f4;
+    --table-row-alt: #fafafa;
+    --max: 820px;
+    --tier2: #d62728;   /* INT2 — red */
+    --tier4: #1f77b4;   /* INT4 — blue */
+    --tier8: #ff7f0e;   /* INT8 — orange */
+    --tier16: #555555;  /* FP16 — dark gray (pre-decision) */
+    --canary: #f4c542;  /* canary highlight — gold */
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: #fff; color: var(--ink); }
+  body {
+    font-family: "Charter", "Iowan Old Style", "Source Serif Pro", Georgia, serif;
+    font-size: 18px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+  header {
+    border-bottom: 1px solid var(--rule);
+    padding: 26px 0 20px;
+    margin-bottom: 36px;
+  }
+  header .inner {
+    max-width: var(--max);
+    margin: 0 auto;
+    padding: 0 24px;
+    font-family: "Inter", "Helvetica Neue", Arial, sans-serif;
+    font-size: 14px;
+    color: var(--muted);
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+  }
+  header .brand { font-weight: 600; color: var(--ink); letter-spacing: 0.02em; }
+
+  article {
+    max-width: var(--max);
+    margin: 0 auto;
+    padding: 0 24px 80px;
+  }
+  h1 {
+    font-family: "Charter", "Iowan Old Style", Georgia, serif;
+    font-size: 38px;
+    line-height: 1.18;
+    margin: 0 0 14px;
+    letter-spacing: -0.01em;
+  }
+  .subtitle {
+    color: var(--muted);
+    font-size: 19px;
+    line-height: 1.5;
+    margin: 0 0 24px;
+    font-style: italic;
+  }
+  .byline {
+    font-family: "Inter", "Helvetica Neue", Arial, sans-serif;
+    font-size: 13px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 40px;
+  }
+  h2 { font-size: 26px; margin: 56px 0 14px; letter-spacing: -0.005em; }
+  h3 {
+    font-size: 17px; margin: 28px 0 6px;
+    font-family: "Inter", "Helvetica Neue", Arial, sans-serif;
+    font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  p { margin: 0 0 18px; }
+  ul, ol { padding-left: 1.4em; } li { margin-bottom: 6px; }
+  a { color: var(--accent); text-decoration: none; border-bottom: 1px solid rgba(0, 54, 181, 0.25); }
+  a:hover { border-bottom-color: var(--accent); }
+  code {
+    font-family: "JetBrains Mono", "SF Mono", Consolas, monospace;
+    font-size: 0.88em; background: var(--code-bg); padding: 2px 5px; border-radius: 3px;
+  }
+  pre.repro {
+    font-family: "JetBrains Mono", "SF Mono", Consolas, monospace;
+    font-size: 13px;
+    background: var(--code-bg);
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    line-height: 1.55;
+    margin: 14px 0;
+  }
+  pre.repro code { background: transparent; padding: 0; font-size: inherit; }
+  pre.repro .c { color: #6a7a8a; }
+
+  /* Mechanism viz — wider than the article body */
+  .viz-wrap {
+    margin: 32px calc(50% - 50vw + 24px) 32px calc(50% - 50vw + 24px);
+    max-width: 100vw;
+    background: #fafafa;
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    padding: 18px 24px 22px;
+  }
+  @media (min-width: 1100px) {
+    .viz-wrap { margin: 32px -120px; max-width: none; }
+  }
+  .viz-title {
+    font-family: "Inter", sans-serif;
+    font-size: 13px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin: 0 0 12px;
+  }
+  .tokens-row {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 14px;
+    color: var(--ink);
+    background: white;
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: 10px 14px;
+    min-height: 50px;
+    margin-bottom: 12px;
+    line-height: 1.7;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .tokens-row .new-tok { background: #fff5cc; animation: flashTok 0.4s ease-out; }
+  @keyframes flashTok { from { background: #ffe066; } to { background: transparent; } }
+  .status-row {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    font-family: "Inter", sans-serif;
+    font-size: 14px;
+    color: var(--muted);
+    margin-bottom: 14px;
+  }
+  .status-row strong { color: var(--ink); font-weight: 600; }
+  .canary-led {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #ddd;
+    margin-right: 6px;
+    transition: background 0.2s, box-shadow 0.2s;
+    vertical-align: middle;
+  }
+  .canary-led.firing {
+    background: var(--canary);
+    box-shadow: 0 0 12px var(--canary);
+  }
+
+  #layerSvg { width: 100%; height: 280px; display: block; }
+  .summary-row {
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    flex-wrap: wrap;
+    font-family: "Inter", sans-serif;
+    font-size: 14px;
+    color: var(--ink);
+    background: white;
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: 10px 14px;
+    margin-top: 8px;
+  }
+  .summary-row .stat { display: flex; align-items: baseline; gap: 6px; }
+  .summary-row .num { font-size: 18px; font-weight: 600; }
+  .summary-row .lbl { color: var(--muted); font-size: 13px; }
+  .legend-tier {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    margin-right: 10px;
+    font-size: 13px;
+    font-family: "Inter", sans-serif;
+    color: var(--muted);
+  }
+  .legend-tier .swatch {
+    width: 12px; height: 12px; border-radius: 2px; display: inline-block;
+  }
+  .controls {
+    margin-top: 14px;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+    font-family: "Inter", sans-serif;
+    font-size: 13px;
+  }
+  .controls button {
+    font-family: inherit;
+    font-size: 13px;
+    padding: 6px 14px;
+    background: white;
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    cursor: pointer;
+    color: var(--ink);
+    transition: background 0.15s;
+  }
+  .controls button:hover { background: var(--code-bg); border-color: #999; }
+  .controls button.active { background: var(--accent); color: white; border-color: var(--accent); }
+  .controls select {
+    font-family: inherit;
+    font-size: 13px;
+    padding: 6px 10px;
+    background: white;
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+  }
+  .controls .speed-label { color: var(--muted); }
+
+  /* Results section */
+  .results-tabs {
+    display: flex;
+    gap: 4px;
+    margin: 18px 0 8px;
+    flex-wrap: wrap;
+    font-family: "Inter", sans-serif;
+    font-size: 13px;
+  }
+  .results-tabs button {
+    font-family: inherit;
+    font-size: 13px;
+    padding: 6px 12px;
+    background: white;
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    cursor: pointer;
+    color: var(--muted);
+  }
+  .results-tabs button.active {
+    background: var(--accent);
+    color: white;
+    border-color: var(--accent);
+  }
+  #resultsChart, #paretoChart { width: 100%; height: 420px; }
+  .results-caption {
+    font-family: "Inter", sans-serif;
+    font-size: 13.5px;
+    color: var(--muted);
+    margin-top: 8px;
+    line-height: 1.5;
+  }
+
+  table {
+    width: 100%; border-collapse: collapse; margin: 18px 0 26px;
+    font-family: "Inter", sans-serif; font-size: 14.5px;
+  }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { font-weight: 600; border-bottom: 2px solid var(--ink); }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tr:nth-child(even) td { background: var(--table-row-alt); }
+  tr.highlight td { background: rgba(0, 54, 181, 0.08); font-weight: 600; }
+
+  details.math {
+    margin: 22px 0;
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    background: var(--code-bg);
+    overflow: hidden;
+  }
+  details.math > summary {
+    cursor: pointer;
+    padding: 12px 18px;
+    font-family: "Inter", "Helvetica Neue", Arial, sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--ink);
+    list-style: none;
+    user-select: none;
+    transition: background 0.15s;
+  }
+  details.math > summary::-webkit-details-marker { display: none; }
+  details.math > summary::before {
+    content: "▸ ";
+    display: inline-block;
+    width: 14px;
+    color: var(--accent);
+    transition: transform 0.2s;
+  }
+  details.math[open] > summary::before { content: "▾ "; }
+  details.math > summary:hover { background: rgba(0,54,181,0.05); }
+  details.math .math-body {
+    padding: 4px 22px 18px;
+    border-top: 1px solid var(--rule);
+    background: white;
+  }
+  details.math .math-body p { margin: 12px 0; }
+  details.math .math-line {
+    font-family: "JetBrains Mono", "SF Mono", Consolas, monospace;
+    font-size: 15px;
+    background: var(--code-bg);
+    padding: 10px 14px;
+    margin: 12px 0;
+    border-left: 3px solid var(--accent);
+    border-radius: 3px;
+    overflow-x: auto;
+  }
+  details.math em { color: var(--muted); }
+
+  /* TL;DR / "why this matters" callout — always visible, anchors the headline
+     numbers at the very top of the page so a reader hits the result before
+     the problem statement. */
+  .tldr {
+    margin: 28px 0 36px;
+    padding: 18px 22px;
+    background: linear-gradient(180deg, rgba(0, 54, 181, 0.05), rgba(0, 54, 181, 0.02));
+    border-left: 4px solid var(--accent);
+    border-radius: 4px;
+    font-family: "Inter", "Helvetica Neue", Arial, sans-serif;
+  }
+  .tldr .tldr-label {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--accent);
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+  .tldr h2.tldr-headline {
+    font-family: inherit;
+    font-size: 19px;
+    line-height: 1.35;
+    margin: 0 0 10px;
+    color: var(--ink);
+    letter-spacing: -0.005em;
+  }
+  .tldr ul {
+    margin: 8px 0 4px;
+    padding-left: 1.2em;
+    font-size: 15.5px;
+    line-height: 1.55;
+    color: var(--ink);
+  }
+  .tldr ul li { margin-bottom: 6px; }
+  .tldr ul li strong { color: var(--accent); }
+
+  /* Floating tooltip used by the tier-vector strips */
+  .tv-tooltip {
+    position: absolute;
+    display: none;
+    pointer-events: none;
+    background: #1a1a1a;
+    color: white;
+    font-family: "Inter", "Helvetica Neue", Arial, sans-serif;
+    font-size: 12px;
+    padding: 6px 10px;
+    border-radius: 4px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.15);
+    z-index: 9999;
+    white-space: nowrap;
+  }
+  .tv-tooltip strong { font-weight: 600; }
+
+  footer {
+    max-width: var(--max);
+    margin: 60px auto 40px;
+    padding: 24px;
+    border-top: 1px solid var(--rule);
+    font-family: "Inter", sans-serif;
+    font-size: 13.5px;
+    color: var(--muted);
+    line-height: 1.6;
+  }
+
+  @media (max-width: 600px) {
+    body { font-size: 17px; }
+    h1 { font-size: 30px; }
+    h2 { font-size: 22px; }
+    .viz-wrap { padding: 14px 16px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="inner">
+    <div class="brand">CS&nbsp;194-16 · Scalable AI · Final Project</div>
+    <div><a href="index.html">written version</a></div>
+  </div>
+</header>
+
+<article>
+
+  <h1>EchoKV: watching a language model decide its own precision</h1>
+  <p class="subtitle">A closed-loop controller that adjusts each layer's
+  attention precision while the model is generating — so memory savings
+  come from the model itself, not a manual tuning pass.</p>
+  <p class="byline">By Nazar Ospanov, Zoir Imomaliev, Jason Trinh, and
+  Sanjay Adhikesaven · Berkeley CS&nbsp;194-16, Spring 2026</p>
+
+  <aside class="tldr">
+    <div class="tldr-label">Why this matters</div>
+    <h2 class="tldr-headline">One controller, no per-workload tuning,
+    adaptive per-layer KV-cache precision at serving time — and it
+    actually beats the static baselines where it counts.</h2>
+    <ul>
+      <li><strong>~75% less KV-cache memory</strong> on
+      long-context retrieval (RULER@128K), matching FP16 accuracy
+      <em>exactly</em> across all 3 seeds at 3.98 bits/element.</li>
+      <li><strong>Beats every static substrate on a tool-use agent.</strong>
+      On τ-Bench retail, EchoKV-3C lands at 0.236 accuracy at 7.95 bits —
+      above FP16 (0.217), INT8 (0.183), and INT4 (0.200) — using the
+      same controller, same τ, same code as RULER.</li>
+    </ul>
+  </aside>
+
+  <h2>The problem in one sentence</h2>
+
+  <p>When a large language model serves a chat or a long document, it
+  keeps the entire past conversation in fast GPU memory. That working
+  memory — the <strong>KV cache</strong> — grows with the conversation,
+  and at 128,000 tokens on a 70-billion-parameter model it can take
+  more space than the model weights themselves.</p>
+
+  <p>The standard fix is to <em>compress</em> the cache: store every
+  number in 4 bits instead of 16 bits, cutting memory 4×. That works,
+  but it's blunt — every layer of the model gets the same compression
+  whether or not it needs to. We wanted to know: <em>can a model
+  decide, on the fly, how aggressively to compress each of its own
+  layers?</em></p>
+
+  <h2>What this gets you</h2>
+
+  <p>Before the mechanism, the headline. On long-context retrieval
+  (RULER@128K) the controller cuts working KV-cache memory by ~75%
+  while matching FP16 accuracy <em>exactly</em> across all 3 seeds —
+  and the extra FP16 storage the controller relies on is so small
+  next to the working cache that it's barely a pixel on the chart
+  below. On the τ-Bench retail tool-use agent, the same controller
+  with the same τ beats every static substrate (FP16, INT8, AND INT4)
+  at fewer bits than static INT8. No per-workload tuning.</p>
+
+  <figure style="margin: 18px 0 26px;">
+    <svg viewBox="0 0 1000 300" preserveAspectRatio="xMidYMid meet"
+         style="width:100%; max-width:1000px; height:auto;
+                border: 1px solid var(--rule); border-radius: 6px;
+                background: #fdfdfb; font-family: 'Inter', sans-serif;">
+      <!-- Title -->
+      <text x="20" y="38" font-size="17" font-weight="600" fill="#1a1a1a">
+        Memory footprint, Llama-3.1-70B at 128 K context (80 layers × 8 KV heads × 128 head dim)
+      </text>
+      <text x="20" y="62" font-size="14" fill="#5a5a5a">
+        Bars drawn to scale — note how invisible the gold FP16 reference is next to the working cache.
+      </text>
+
+      <!-- Row 1: hypothetical full FP16 KV cache (we do NOT keep this) -->
+      <text x="20" y="114" font-size="14" fill="#555">Full FP16 KV cache, K+V, all 128 K tokens —</text>
+      <text x="20" y="132" font-size="13" fill="#999" font-style="italic">(what we'd pay without compression)</text>
+      <rect x="400" y="96" width="560" height="32" fill="#bbb" opacity="0.7"/>
+      <text x="680" y="117" text-anchor="middle" font-size="15" fill="#222" font-weight="600">41.9 GB</text>
+
+      <!-- Row 2: paged INT4 cache (what we actually store, on RULER@128K) -->
+      <text x="20" y="178" font-size="14" fill="#555">Paged KV cache @ INT4, K+V, all 128 K tokens —</text>
+      <text x="20" y="196" font-size="13" fill="#999" font-style="italic">(what we actually store for attention)</text>
+      <rect x="400" y="160" width="140" height="32" fill="#1f77b4" opacity="0.85"/>
+      <text x="470" y="181" text-anchor="middle" font-size="15" fill="white" font-weight="600">10.5 GB</text>
+      <text x="555" y="181" font-size="13" fill="#0036b5">~75% cut vs. FP16</text>
+
+      <!-- Row 3: K_ref FP16 (the only FP16 thing in the system) -->
+      <text x="20" y="242" font-size="14" fill="#555">FP16 K<tspan baseline-shift="sub" font-size="10">ref</tspan> ring buffer, K only, last 64 tokens —</text>
+      <text x="20" y="260" font-size="13" fill="#999" font-style="italic">(the canary's reference; the ONLY FP16 storage)</text>
+      <rect x="400" y="224" width="3" height="32" fill="#daa520"/>
+      <!-- The 10.5 MB bar is barely a pixel — annotate with a leader line. -->
+      <line x1="405" y1="240" x2="445" y2="240" stroke="#7a5800" stroke-width="1.2"/>
+      <text x="450" y="245" font-size="15" fill="#7a5800" font-weight="600">10.5 MB</text>
+      <text x="540" y="245" font-size="13" fill="#7a5800" font-style="italic">~1000× smaller than the working cache</text>
+    </svg>
+    <figcaption style="font-family: Inter, sans-serif; font-size: 13.5px; color: var(--muted); margin-top: 10px; line-height: 1.5; max-width: 820px; margin-left: auto; margin-right: auto;">
+      Three storage layers shown to scale. Only the gold sliver ($K_{\text{ref}}$) is FP16 — and it is a per-layer sliding ring of just 64 recent K vectors, ≈ 10 MB total for the whole 70 B model at 128 K context. The blue bar (≈ 10 GB) is what attention actually reads from on every decode step; it is INT4 / INT8 / INT2 per layer, chosen by the canary using the gold reference as ground truth. The gray bar (≈ 42 GB) is the hypothetical "store everything in FP16" baseline that EchoKV never pays.
+    </figcaption>
+  </figure>
+
+  <p style="font-size: 14px; color: var(--muted); margin-top: -8px;">
+    Full multi-seed accuracy results across all five workloads
+    (GSM8K-Hard, HotpotQA, RULER@128K, τ-Bench airline &amp; retail),
+    paired McNemar tests, and per-layer tier vectors are in the
+    results section further down. What follows next is how the
+    controller decides those bit-widths in the first place.
+  </p>
+
+  <h2>How EchoKV works</h2>
+
+  <p>EchoKV has four pieces that talk to each other while the model is
+  generating text:</p>
+
+  <figure style="margin: 24px 0; text-align: center;">
+    <svg viewBox="0 0 1000 520" preserveAspectRatio="xMidYMid meet"
+         style="width:100%; max-width:1000px; height:auto;
+                border: 1px solid var(--rule); border-radius: 6px;
+                background: #fdfdfb; font-family: 'Inter', sans-serif;">
+      <defs>
+        <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5"
+                markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#444"/>
+        </marker>
+        <marker id="arrowAccent" viewBox="0 0 10 10" refX="9" refY="5"
+                markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#0036b5"/>
+        </marker>
+        <marker id="arrowDashed" viewBox="0 0 10 10" refX="9" refY="5"
+                markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#888"/>
+        </marker>
+      </defs>
+
+      <!-- ─── TOP STRIP: decoding loop ──────────────────────────────── -->
+      <rect x="20" y="20" width="960" height="150" rx="10"
+            fill="#fff" stroke="#ddd" stroke-width="1"/>
+      <text x="40" y="46" font-size="13" font-weight="600" fill="#5a5a5a"
+            letter-spacing="0.05em">DECODE STEP&nbsp;&nbsp;(every step)</text>
+
+      <!-- K_ℓ box -->
+      <rect x="50" y="80" width="120" height="60" rx="6"
+            fill="white" stroke="#1f77b4" stroke-width="1.5"/>
+      <text x="110" y="105" text-anchor="middle" font-size="13" fill="#1a1a1a">K<tspan font-size="10" baseline-shift="sub">ℓ</tspan> (FP16)</text>
+      <text x="110" y="123" text-anchor="middle" font-size="11" fill="#666">key projection</text>
+
+      <!-- K_ref ring buffer (highlighted — the load-bearing block) -->
+      <rect x="220" y="78" width="180" height="64" rx="6"
+            fill="#fff8dc" stroke="#daa520" stroke-width="2"/>
+      <text x="310" y="96" text-anchor="middle" font-size="13" font-weight="600" fill="#7a5800">K<tspan font-size="10" baseline-shift="sub">ref</tspan> ring buffer</text>
+      <text x="310" y="112" text-anchor="middle" font-size="11" fill="#7a5800">FP16, last 64 tokens (K only)</text>
+      <text x="310" y="126" text-anchor="middle" font-size="11" fill="#7a5800" font-style="italic">~10 MB — 0.1% of cache</text>
+      <text x="310" y="138" text-anchor="middle" font-size="10" fill="#7a5800" font-style="italic">captured BEFORE quant</text>
+
+      <!-- quant_b box -->
+      <rect x="450" y="80" width="160" height="60" rx="6"
+            fill="white" stroke="#5a5a5a" stroke-width="1.5"/>
+      <text x="530" y="105" text-anchor="middle" font-size="13" fill="#1a1a1a">quant<tspan font-size="10" baseline-shift="sub">b<tspan baseline-shift="sub" font-size="8">ℓ</tspan></tspan>(K<tspan font-size="10" baseline-shift="sub">ℓ</tspan>)</text>
+      <text x="530" y="123" text-anchor="middle" font-size="11" fill="#666">to current bit-width</text>
+
+      <!-- Paged cache (3 pools) -->
+      <rect x="660" y="78" width="300" height="64" rx="6"
+            fill="white" stroke="#5a5a5a" stroke-width="1.5"/>
+      <text x="810" y="98" text-anchor="middle" font-size="13" fill="#1a1a1a">paged KV cache</text>
+      <rect x="680" y="106" width="80" height="26" fill="#d62728" opacity="0.85" rx="3"/>
+      <text x="720" y="124" text-anchor="middle" font-size="11" fill="white" font-weight="600">INT2 pool</text>
+      <rect x="770" y="106" width="80" height="26" fill="#1f77b4" opacity="0.85" rx="3"/>
+      <text x="810" y="124" text-anchor="middle" font-size="11" fill="white" font-weight="600">INT4 pool</text>
+      <rect x="860" y="106" width="80" height="26" fill="#ff7f0e" opacity="0.85" rx="3"/>
+      <text x="900" y="124" text-anchor="middle" font-size="11" fill="white" font-weight="600">INT8 pool</text>
+
+      <!-- Arrows in the top strip -->
+      <line x1="170" y1="110" x2="218" y2="110" stroke="#444" stroke-width="1.6" marker-end="url(#arrow)"/>
+      <line x1="400" y1="110" x2="448" y2="110" stroke="#444" stroke-width="1.6" marker-end="url(#arrow)"/>
+      <line x1="610" y1="110" x2="658" y2="110" stroke="#444" stroke-width="1.6" marker-end="url(#arrow)"/>
+
+      <!-- "every 1/64 steps" arrow from K_ref down to canary -->
+      <line x1="310" y1="148" x2="310" y2="220" stroke="#888"
+            stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#arrowDashed)"/>
+      <text x="320" y="180" font-size="11" fill="#888" font-style="italic">canary fires</text>
+      <text x="320" y="195" font-size="11" fill="#888" font-style="italic">~1 in 64 steps</text>
+
+      <!-- ─── CANARY BOX (bottom-left) ──────────────────────────────── -->
+      <rect x="50" y="220" width="430" height="240" rx="10"
+            fill="white" stroke="#0036b5" stroke-width="1.5"/>
+      <text x="70" y="245" font-size="13" font-weight="600" fill="#0036b5"
+            letter-spacing="0.05em">CANARY ESTIMATOR</text>
+      <text x="70" y="266" font-size="12" fill="#1a1a1a">
+        for each layer ℓ and each candidate b ∈ {2, 4, 8}:
+      </text>
+      <foreignObject x="58" y="276" width="416" height="50">
+        <div xmlns="http://www.w3.org/1999/xhtml"
+             style="font-size: 13.5px; color: #1a1a1a; text-align: center;
+                    padding: 4px 0 0 0; line-height: 1.2;">
+          $\hat{\delta}_{\ell,b} = D_{\mathrm{KL}}\!\bigl(\mathrm{softmax}(Q K_{\text{ref}}^\top) \,\|\, \mathrm{softmax}(Q\,\mathrm{quant}_b(K_{\text{ref}})^\top)\bigr)$
+        </div>
+      </foreignObject>
+
+      <!-- ─── KL inset: two softmax curves with shaded gap ────────────── -->
+      <!-- KL inset: two softmax curves that cross multiple times (quant
+           perturbs softmax in both directions). Legend moved BELOW the
+           chart so it never overlaps the curves. -->
+      <g transform="translate(60, 320)">
+        <rect x="0" y="0" width="200" height="135" fill="#fafafa" stroke="#ddd" rx="4"/>
+        <text x="100" y="14" text-anchor="middle" font-size="10.5"
+              fill="#666" letter-spacing="0.03em">attention distribution</text>
+        <!-- axes -->
+        <line x1="14" y1="82" x2="190" y2="82" stroke="#aaa" stroke-width="0.7"/>
+        <line x1="14" y1="20" x2="14" y2="82" stroke="#aaa" stroke-width="0.7"/>
+        <text x="10" y="82" text-anchor="end" font-size="9" fill="#888">0</text>
+        <text x="10" y="24" text-anchor="end" font-size="9" fill="#888">p</text>
+        <text x="190" y="93" text-anchor="end" font-size="9" fill="#888">key idx →</text>
+
+        <!-- Shaded ribbon: forward along blue, then backward along red.
+             Where curves cross, the closed path twists — visually the
+             |FP16 − quantized| at each key position. -->
+        <path d="
+          M 18 65 Q 30 20 55 35 Q 80 50 100 38 Q 125 28 145 50 Q 160 65 178 70
+          L 178 76
+          Q 160 60 145 48 Q 125 35 100 43 Q 80 48 55 30 Q 30 25 18 58
+          Z"
+          fill="#0036b5" opacity="0.14"/>
+
+        <!-- FP16 softmax curve (solid blue) -->
+        <path d="M 18 65 Q 30 20 55 35 Q 80 50 100 38 Q 125 28 145 50 Q 160 65 178 70"
+              fill="none" stroke="#0036b5" stroke-width="2"/>
+        <!-- Quantized softmax curve (dashed red) — crosses blue at multiple key indices,
+             going both above AND below FP16 because quantization noise is signed. -->
+        <path d="M 18 58 Q 30 25 55 30 Q 80 48 100 43 Q 125 35 145 48 Q 160 60 178 76"
+              fill="none" stroke="#d62728" stroke-width="2" stroke-dasharray="4 3"/>
+
+        <!-- Legend BELOW the chart, two rows. Never overlaps curves. -->
+        <line x1="14"  y1="106" x2="32"  y2="106" stroke="#0036b5" stroke-width="2"/>
+        <text x="36"   y="109"  font-size="9.5" fill="#333">FP16 softmax</text>
+        <line x1="106" y1="106" x2="124" y2="106" stroke="#d62728" stroke-width="2" stroke-dasharray="4 3"/>
+        <text x="128"  y="109"  font-size="9.5" fill="#333">quant softmax</text>
+
+        <rect x="14"  y="119" width="18" height="9"
+              fill="#0036b5" opacity="0.18"
+              stroke="#0036b5" stroke-opacity="0.35" stroke-width="0.6"/>
+        <text x="36" y="127" font-size="9.5" fill="#0036b5" font-weight="600">|FP16 − quant| ≈ KL</text>
+      </g>
+
+      <!-- math reminder beside inset (uses foreignObject so KaTeX
+           renders the δ̂ properly) -->
+      <foreignObject x="278" y="328" width="200" height="100">
+        <div xmlns="http://www.w3.org/1999/xhtml"
+             style="font-size: 11.5px; color: #444; line-height: 1.45;">
+          A small $\hat{\delta}$ means the quantized cache barely
+          changes attention — that layer can stay at the lower
+          bit-width.
+        </div>
+      </foreignObject>
+
+      <!-- ─── CONTROLLER BOX (bottom-right) ─────────────────────────── -->
+      <rect x="540" y="220" width="420" height="240" rx="10"
+            fill="white" stroke="#0036b5" stroke-width="1.5"/>
+      <text x="560" y="245" font-size="13" font-weight="600" fill="#0036b5"
+            letter-spacing="0.05em">PID CONTROLLER&nbsp;&nbsp;(per layer)</text>
+
+      <text x="560" y="278" font-size="12" fill="#1a1a1a">1. exponential-moving-average smoothing:</text>
+      <foreignObject x="572" y="284" width="380" height="28">
+        <div xmlns="http://www.w3.org/1999/xhtml"
+             style="font-size: 13px; color: #1a1a1a; line-height: 1.2;">
+          $\mathrm{EMA}_{\ell,b} \leftarrow (1-\alpha)\,\mathrm{EMA}_{\ell,b} + \alpha\,\hat{\delta}_{\ell,b}$
+        </div>
+      </foreignObject>
+
+      <text x="560" y="332" font-size="12" fill="#1a1a1a">2. argmin under budget τ:</text>
+      <foreignObject x="572" y="338" width="380" height="28">
+        <div xmlns="http://www.w3.org/1999/xhtml"
+             style="font-size: 13px; color: #1a1a1a; line-height: 1.2;">
+          $\hat{b}_\ell = \min\{\,b \in \{2,4,8\} : \mathrm{EMA}_{\ell,b} < \tau\,\}$
+        </div>
+      </foreignObject>
+
+      <text x="560" y="384" font-size="12" fill="#1a1a1a">3. broadcast new tier vector to TP ranks</text>
+      <text x="560" y="402" font-size="12" fill="#1a1a1a">4. allocator routes new K blocks to the chosen pool</text>
+
+      <!-- Decision pseudocode style -->
+      <rect x="560" y="416" width="380" height="34" fill="#f7f7f4" stroke="#ddd" rx="4"/>
+      <foreignObject x="566" y="420" width="370" height="28">
+        <div xmlns="http://www.w3.org/1999/xhtml"
+             style="font-size: 12px; color: #0036b5; line-height: 1.2;">
+          if $\mathrm{EMA}_{\ell,b_\ell} > \tau$ &nbsp;→&nbsp; upgrade layer $\ell$ next batch
+        </div>
+      </foreignObject>
+
+      <!-- Arrows between boxes -->
+      <line x1="480" y1="305" x2="538" y2="305" stroke="#0036b5"
+            stroke-width="2" marker-end="url(#arrowAccent)"/>
+      <foreignObject x="478" y="278" width="62" height="22">
+        <div xmlns="http://www.w3.org/1999/xhtml"
+             style="font-size: 12px; color: #0036b5; font-weight: 600; text-align: center; line-height: 1.1;">
+          $\hat{\delta}_{\ell,b}$
+        </div>
+      </foreignObject>
+      <text x="509" y="320" text-anchor="middle" font-size="9.5" fill="#0036b5" font-style="italic">b ∈ {2,4,8}</text>
+
+      <!-- Feedback arrow: controller → cache (top-right) -->
+      <path d="M 950 280 Q 985 280 985 230 Q 985 175 905 165"
+            fill="none" stroke="#0036b5" stroke-width="2"
+            stroke-dasharray="6 3" marker-end="url(#arrowAccent)"/>
+      <!-- Label placed adjacent to the arrow path, not at the bottom of the viz. -->
+      <rect x="630" y="178" width="332" height="22" fill="#0036b5" opacity="0.08" rx="3"/>
+      <text x="796" y="194" text-anchor="middle" font-size="11.5" fill="#0036b5" font-weight="600">
+        new tier vector b̂<tspan font-size="9" baseline-shift="sub">ℓ</tspan> ∈ {2, 4, 8} routes NEW K blocks ↑
+      </text>
+      <!-- Small leader line from label rect to the arrow path -->
+      <line x1="962" y1="200" x2="985" y2="230" stroke="#0036b5" stroke-width="1" stroke-dasharray="3 2" opacity="0.5"/>
+    </svg>
+    <figcaption style="font-family: Inter, sans-serif; font-size: 13.5px; color: var(--muted); margin-top: 10px; line-height: 1.5; max-width: 760px; margin-left: auto; margin-right: auto;">
+      EchoKV's mechanism. Every decode step, the model's key projection
+      $K_\ell$ is written into a per-layer FP16 <strong>ring buffer
+      $K_{\text{ref}}$</strong> <em>before</em> being quantized into the
+      paged cache. This buffer is the load-bearing trick (paper §4 / fig 2):
+      it gives the canary a clean FP16 reference, so the measurement
+      doesn't depend on the controller's own past decisions. On about 1
+      in 64 steps the canary fires, computing the KL divergence between
+      full-precision attention and three candidate quantizations
+      $b \in \{2, 4, 8\}$. The PID controller smooths those values with
+      an EMA and picks each layer's bit-width as the lowest $b$ whose
+      smoothed divergence stays under the budget $\tau$. The new tier
+      vector routes <em>future</em> K blocks to the right pool;
+      already-allocated blocks are never modified.
+    </figcaption>
+  </figure>
+
+  <h3>See it run</h3>
+
+  <p>The animation below is a simulation of EchoKV running inside a
+  20-layer language model.<sup style="font-size:11px;">*</sup>
+  Most of the time, the model just generates text. Periodically a
+  small "canary" measurement fires: for every layer, it computes how
+  much the attention output would drift if that layer's cache were
+  compressed to INT2, INT4, or INT8. Layers whose drift stays below a
+  threshold can use the more aggressive compression; layers whose
+  drift exceeds the threshold get upgraded to keep accuracy intact.
+  Press play, or change the workload, to watch it adjust.</p>
+
+  <div class="viz-wrap">
+    <p class="viz-title">EchoKV controller — interactive simulation</p>
+    <div class="tokens-row" id="tokensRow"></div>
+    <div class="status-row">
+      <div><span class="canary-led" id="canaryLed"></span><strong id="statusText">Decoding…</strong></div>
+      <div>step: <strong id="stepNum">0</strong></div>
+      <div>workload: <strong id="workloadName">GSM8K-Hard</strong></div>
+    </div>
+    <svg id="layerSvg" viewBox="0 0 1000 280" preserveAspectRatio="none"></svg>
+    <div class="summary-row">
+      <span class="legend-tier"><span class="swatch" style="background:var(--tier16)"></span>FP16 (16 bits, initial)</span>
+      <span class="legend-tier"><span class="swatch" style="background:var(--tier2)"></span>INT2 (2 bits)</span>
+      <span class="legend-tier"><span class="swatch" style="background:var(--tier4)"></span>INT4 (4 bits)</span>
+      <span class="legend-tier"><span class="swatch" style="background:var(--tier8)"></span>INT8 (8 bits)</span>
+      <div style="margin-left:auto" class="stat"><span class="num" id="avgBits">16.00</span><span class="lbl">avg bits / element</span></div>
+      <div class="stat"><span class="num" id="memSavings">0%</span><span class="lbl">memory saved vs FP16</span></div>
+    </div>
+    <div class="controls">
+      <button id="btnPlay">▶ Play</button>
+      <button id="btnStep">Step</button>
+      <button id="btnReset">Reset</button>
+      <span class="speed-label">Animation speed</span>
+      <select id="speed">
+        <option value="1">1×</option>
+        <option value="2" selected>2×</option>
+        <option value="4">4×</option>
+        <option value="8">8×</option>
+      </select>
+      <span class="speed-label">Workload</span>
+      <select id="workloadSelect">
+        <option value="gsm8k">GSM8K-Hard</option>
+        <option value="hotpotqa">HotpotQA</option>
+        <option value="ruler">RULER@128K</option>
+        <option value="taubench">τ-Bench</option>
+      </select>
+    </div>
+  </div>
+
+  <p style="font-size:14px; color:var(--muted); margin-top:-12px;">
+    <sup>*</sup> The KL values, threshold position, and tier
+    distributions in this animation are <em>illustrative</em> — they
+    are deterministic synthetic patterns chosen so each workload's
+    typical allocation looks plausible, not the actual per-layer
+    measurements from our experiments. Real Llama-3.1-70B has 80
+    layers, not 20; the canary fires on ~1 in 64 decode steps in
+    production, not every few steps as shown here. The
+    "Animation&nbsp;speed" control sets only the <em>visualization</em>
+    cadence so you can watch each phase — real decoding runs many
+    orders of magnitude faster (real-world EchoKV adds only ~0.09%
+    to time-per-output-token at production canary rate, so the canary
+    fires and tier updates are essentially invisible on the wall clock).
+    The point is to show the <em>mechanism</em> — how a canary
+    firing drives per-layer bit-width decisions — not the exact
+    numbers a real run produces. Real measured results are further
+    down the page.
+  </p>
+
+  <h3>What you're seeing</h3>
+  <ul>
+    <li><strong>Top:</strong> tokens the model has generated so far.</li>
+    <li><strong>Middle (the layers):</strong> each thin column is one
+    layer of the model. Its color shows the current bit-width assigned
+    to it: <strong>gray = FP16</strong> (the pre-decision state at
+    step 0, before any canary has fired), <strong>red = INT2</strong>
+    (most compressed), <strong>blue = INT4</strong> (standard),
+    <strong>orange = INT8</strong> (least compressed). All layers
+    start gray; the first canary firing replaces them with a mix of
+    {INT2, INT4, INT8}.</li>
+    <li><strong>When the canary fires:</strong> three small bars rise
+    above each layer — the simulated KL divergences for INT2 / INT4 /
+    INT8. The horizontal dashed line is the divergence budget
+    <code>τ</code>. Layers whose INT4 bar is above the line get
+    upgraded; layers whose INT2 bar is below the line could
+    even be downgraded.</li>
+    <li><strong>Bottom:</strong> the running average bit-width and the
+    memory savings vs FP16.</li>
+  </ul>
+
+  <h3>Do we store the whole cache in FP16? — No.</h3>
+
+  <p>The simulation above hides two mechanism details worth zooming
+  in on. The first: <em>"if the canary measures KL against an FP16
+  reference, doesn't that mean we're paying full-precision memory
+  somewhere?"</em> Answer: no — the FP16 reference is a tiny sliding
+  ring buffer of <strong>just the last 64 K vectors per layer</strong>,
+  with no V at all (about 10 MB total for the whole 70 B model at 128 K
+  context — the gold sliver in the memory-footprint figure near the
+  top of the page). Everything else — the actual KV cache the model
+  reads from during attention — is paged INT2/INT4/INT8, sized and
+  routed per layer by the controller.</p>
+
+  <h3>How the ring buffer slides</h3>
+
+  <p>Each cell below is one FP16 K vector for a single layer. The left
+  block (gray) is the <em>prompt context</em> — the last few K's from
+  prefill, already in the ring by the time decoding begins. The
+  controller never sees an empty ring; from tick 0 it has real keys to
+  measure against. The gold cells are decode K's, appended on the
+  right as the model generates. When the canary fires (~1 in 64 decode
+  steps in production, more often here for visibility), it measures KL
+  across <em>whatever's in the ring at that moment</em> — up to 64 K's
+  — in FP16 vs. a temporary INT2/INT4/INT8 copy of those same keys.
+  The canary is testing the <em>quantization function</em>, not
+  reconstructing the model's full output.</p>
+
+  <div class="viz-wrap" style="position: relative;">
+    <p class="viz-title">$K_{\text{ref}}$ ring buffer — 128 decode steps of one layer's timeline</p>
+    <div class="status-row">
+      <div><span class="canary-led" id="kbLed"></span><strong id="kbStatus">Decoding…</strong></div>
+      <div>decode step: <strong id="kbStep">0</strong></div>
+      <div>K's in ring: <strong id="kbOldest">16 / 64</strong></div>
+      <div>newest: <strong id="kbNewest">—</strong></div>
+    </div>
+    <svg id="kbSvg" viewBox="0 0 1000 240" preserveAspectRatio="xMidYMid meet" style="width:100%; height:auto; display:block;"></svg>
+  </div>
+
+  <h3>What happens to old blocks when a layer changes tier?</h3>
+
+  <p>The second detail: <em>"if a layer's bit-width changes from
+  INT4 to INT8 between firings (the simulation above shows this
+  happening live), where do the new 8-bit numbers come from for the
+  old tokens? Don't we need the FP16 originals to re-quantize?"</em>
+  Right — we don't have FP16 originals for old tokens (the ring
+  buffer only holds the last 64). So we don't re-quantize.
+  <strong>Tier changes are forward-only:</strong> already-stored K
+  blocks stay at their admit-time bit-width forever; the controller's
+  new decision only affects K blocks allocated <em>after</em> the
+  firing. The result is a temporally-striped cache — each layer's
+  storage is a record of every tier decision the controller made
+  over the lifetime of the request. vLLM's paged attention reads
+  each block independently with its stored bit-width, so mixing
+  precisions inside the same layer is fine.</p>
+
+  <div class="viz-wrap" style="position: relative;">
+    <p class="viz-title">Three representative layers' KV caches as tokens stream in — each layer's canary decisions move independently</p>
+    <div class="status-row" style="margin-bottom: 4px;">
+      <div><span class="canary-led" id="stripeLed"></span><strong id="stripeStatus">Decoding…</strong></div>
+    </div>
+    <div class="status-row" style="margin-bottom: 4px;">
+      <div>token: <strong id="stripeStep">0</strong></div>
+    </div>
+    <div class="status-row">
+      <div>current admit tiers: <strong id="stripeTier">L0:INT4 · L1:INT8 · L79:INT4</strong></div>
+    </div>
+    <svg id="stripeSvg" viewBox="0 0 1000 240" preserveAspectRatio="xMidYMid meet" style="width:100%; height:auto; display:block;"></svg>
+  </div>
+
+  <details class="math">
+    <summary>Show the math — what the canary actually computes</summary>
+    <div class="math-body">
+
+      <p>Attention at layer $\ell$ on the full-precision (FP16) key
+      tensor $K_\ell$ produces a softmax distribution over past
+      tokens. If we replaced $K_\ell$ with its quantized version
+      $\mathrm{quant}_b(K_\ell)$, the softmax shifts. The canary measures
+      how much, per-layer and per-candidate-bit-width $b$, using
+      KL divergence:</p>
+
+      $$\hat{\delta}_{\ell,b} \;=\; D_{\mathrm{KL}}\!\left(\,\mathrm{softmax}(Q_\ell K_\ell^\top) \;\big\|\; \mathrm{softmax}(Q_\ell\,\mathrm{quant}_b(K_\ell)^\top)\,\right)$$
+
+      <p>where $\mathrm{quant}_b(\cdot)$ is KIVI-style asymmetric
+      per-group $b$-bit quantization. The KL is summed over the
+      attention sequence dim and averaged over the query dim, so each
+      canary firing produces one number per (layer, bit-width) pair —
+      $3L$ numbers per firing for $b \in \{2, 4, 8\}$ and $L$
+      layers.</p>
+
+      <p>Single readings are noisy, so each $(\ell, b)$ value goes
+      into an exponential moving average:</p>
+
+      $$\mathrm{EMA}_{t+1} \;=\; (1-\alpha)\,\mathrm{EMA}_t \;+\; \alpha\,\hat{\delta}_{\mathrm{obs}}, \qquad \alpha = 0.1$$
+
+      <p>The controller then picks each layer's bit-width as the
+      lowest $b$ whose smoothed divergence stays under the budget
+      $\tau$:</p>
+
+      $$\hat{b}_\ell \;=\; \min\!\left\{\,b \in \{2, 4, 8\} \;:\; \mathrm{EMA}_{\ell,b} < \tau_{\mathrm{budget}}\,\right\}$$
+
+      <p>Three details that matter for stability:</p>
+
+      <ul>
+        <li><strong>The "absolute" canary.</strong> $K_\ell$ in the
+        formula above is read from a per-layer ring buffer of the
+        most recent 64 FP16 K projections (≈ 10 MB total for
+        Llama-3.1-70B at 128 K context — &lt;0.1% of the working
+        quantized cache), captured <em>before</em> any
+        tier-application. Earlier designs measured KL against the
+        running quantized cache, which creates a feedback loop where
+        controller decisions perturb the measurement substrate.
+        Reading against a fixed FP16 reference breaks the loop.</li>
+        <li><strong>Bidirectional adjustment — promote AND demote.</strong>
+        The argmin is recomputed from scratch on every canary firing,
+        so a layer isn't locked into its first decision. A layer
+        currently at INT2 whose smoothed KL@INT2 starts exceeding the
+        INT2 budget gets <em>promoted</em> to INT4 or INT8; an INT8
+        layer whose KL@INT4 has dropped back below $\tau$ gets
+        <em>demoted</em> to INT4. The reason it shifts: every firing
+        sees a different $K_{\text{ref}}$ window (the 64-token ring rotates as
+        decoding proceeds), a different batch of queries, and
+        content-dependent quantization error (KIVI's per-group
+        scale is a function of the group's max/min, so incoming keys
+        with outliers blow up the per-group quant error), all
+        amplified by softmax sharpness — workloads that demand
+        precise attention to specific tokens see larger KL swings
+        under quantization than workloads with diffuse attention.
+        The EMA smooths token-level noise out, but real workload
+        drift propagates through, and the controller follows it
+        bidirectionally.</li>
+        <li><strong>The $\tau(L)$ scaling.</strong> Attention
+        sparsity falls as context length grows, so the same per-step
+        divergence translates into different model-output drift at
+        different context lengths. We rescale the budget by
+        $\tau(L) = \tau_0 \sqrt{L/L_0}$ (Pinsker-derived; at
+        $L_0 = 4\text{K}$, $\tau_0 = 0.022$). At 128K context this
+        gives $\tau = 0.124$. Without the rescaling, the controller
+        cascades to nearly-uniform INT8 at long context even when
+        INT4 would have been fine.</li>
+      </ul>
+
+      <p>At production canary rate <em>p_c = 1/64</em>, this whole
+      pipeline adds <strong>~0.09% to time-per-output-token</strong>
+      on Llama-3.1-8B + RULER.</p>
+
+    </div>
+  </details>
+
+  <h2>Multi-seed results on Llama-3.1-70B</h2>
+
+  <p>We tested EchoKV on five workloads at Llama-3.1-70B, running each
+  one with three random seeds and using paired McNemar's test for
+  significance. The plot below puts each substrate on a single
+  <strong>bits-vs-accuracy</strong> axis — bits per element on x
+  (left = less memory), 3-seed-mean accuracy on y — with vertical
+  error bars showing the accuracy spread across seeds and horizontal
+  error bars showing the bit-budget spread. FP16, INT4, and INT8
+  have fixed bit-widths so their horizontal bars collapse to a
+  point; EchoKV's bar widens whenever the controller drifts across
+  seeds (most visibly on GSM8K-Hard).</p>
+
+  <details class="math">
+    <summary>Hardware &amp; serving configuration</summary>
+    <div class="math-body">
+      <p>All measurements use the same physical host and the same
+      pinned software stack. The only thing that changes between cells
+      is the KV-cache substrate (FP16 / static INT4 / static INT8 /
+      EchoKV-3C); prompts, decoding parameters, and random seeds are
+      paired across substrates.</p>
+      <ul>
+        <li><strong>Model:</strong> Llama-3.1-70B-Instruct (FP16
+        weights), via vLLM's <code>LLM.generate</code> path.</li>
+        <li><strong>GPUs:</strong> 8 × NVIDIA H100 80 GB HBM3 on a
+        single host.</li>
+        <li><strong>Tensor parallel:</strong> TP=4 (4 H100s) for
+        GSM8K-Hard, HotpotQA, and RULER@128K — these fit comfortably
+        and let us run two workloads in parallel on the 8-GPU box.
+        TP=8 (all 8 H100s) for τ-Bench airline and τ-Bench retail
+        because the tool-use agent generates longer trajectories and
+        benefits from the extra throughput.</li>
+        <li><strong>Serving stack:</strong> vLLM 0.16.0 + PyTorch
+        2.9.1 (CUDA 12.8) in a project-pinned conda environment. The
+        EchoKV controller runs as a forward-pre-hook shadow-quant
+        emulation layer on top of the unmodified vLLM PagedAttention
+        path; the static-INT4/INT8 cells use the same emulation
+        layer with a fixed tier vector.</li>
+        <li><strong>Sample sizes (per seed):</strong> n=500 for
+        GSM8K-Hard and HotpotQA, n=100 for RULER@128K (its standard
+        eval slice), full test set for τ-Bench airline (50 tasks) and
+        τ-Bench retail (115 tasks).</li>
+        <li><strong>Statistical protocol:</strong> three seeds per
+        workload; paired McNemar's test between substrates on
+        per-prompt correctness, plus the per-seed accuracy itself for
+        the small-n τ-Bench cells where McNemar is underpowered.</li>
+      </ul>
+      <p>Per-seed wall-time is roughly 55–65 min for GSM8K-Hard and
+      HotpotQA, 90–120 min for RULER@128K, and ~2.2 h for each
+      τ-Bench split. The same numbers reproduce on a clean clone of
+      the repo using the launcher scripts in <code>scripts/22</code>
+      through <code>scripts/29</code>.</p>
+    </div>
+  </details>
+
+  <details class="math">
+    <summary>Measurement protocol — warmup, freeze, measure</summary>
+    <div class="math-body">
+      <p>Every EchoKV cell on this page is the result of a
+      <strong>two-phase run</strong> that cleanly separates "the
+      controller deciding its tier vector" from "scoring that tier
+      vector against the static baselines." The two phases share a
+      model load but use disjoint prompts so the controller never
+      sees the prompts it's being graded on.</p>
+      <ol>
+        <li><strong>Phase 1 — warmup (n=16 prompts, controller
+        active).</strong> We draw 16 prompts from the workload's
+        dataset at a different seed offset than the measurement set
+        (e.g. for GSM8K-Hard: warmup at <code>seed+100</code>,
+        measurement at <code>seed</code>). The model answers each
+        prompt fully (prefill → generate up to <code>max_new_tokens</code>
+        of reasoning + answer). During the decode loop, the canary
+        fires on a fraction of decode steps, computes
+        $\hat{\delta}_{\ell,b}$ for every (layer, bit-width) pair,
+        and feeds the per-(ℓ, b) EMA. Each layer's bit-width is
+        updated live as the EMA evolves. Because each answer is
+        hundreds of decode tokens long, even 16 prompts give the
+        controller <em>thousands</em> of canary measurements per
+        layer to converge on — far more than the prompt count
+        suggests.</li>
+        <li><strong>Phase 2 — consolidate &amp; freeze.</strong> At
+        the end of warmup, we snapshot the per-layer tier vector
+        from every TP rank, consolidate across ranks (majority vote
+        per layer), and lock that 80-element vector. The canary rate
+        is dropped to ~$10^{-6}$ (effectively off) and
+        <code>freeze_controller</code> is set to <code>True</code>
+        — no further updates.</li>
+        <li><strong>Phase 3 — measurement (frozen tiers).</strong>
+        The measurement prompts (different from warmup) are run with
+        the frozen tier vector. The per-workload sample size is
+        whatever's standard for that benchmark — <code>n=500</code>
+        for GSM8K-Hard and HotpotQA, <code>n=100</code> for
+        RULER@128K, the full test sets for τ-Bench airline
+        (<code>n=50</code> tasks) and τ-Bench retail
+        (<code>n=115</code> tasks). We score each prompt for
+        correctness, and we run FP16, static INT4, and static INT8
+        cells on the <em>exact same prompts in the same order with
+        the same seed</em>, then pair them prompt-by-prompt for
+        McNemar's test. The 80-element vectors visualized in the
+        "real per-layer tier vectors" figure below are these frozen
+        post-warmup assignments — one decision per (workload,
+        seed), held constant across all measurement prompts of that
+        seed.</li>
+      </ol>
+      <p>The freeze is what makes paired comparison clean: if the
+      controller kept adjusting during measurement, every prompt
+      would be on a slightly different substrate and the paired
+      test would lose its meaning. The cost is that the controller
+      can't react to in-distribution drift across measurement —
+      exploring "online τ adaptation" without breaking the paired
+      protocol is one of our Future-Work items.</p>
+    </div>
+  </details>
+
+  <div class="results-tabs" id="resultsTabs"></div>
+  <div id="resultsChart"></div>
+  <p class="results-caption" id="resultsCaption"></p>
+
+  <h3>The picture across all five workloads</h3>
+
+  <table id="summaryTable">
+    <thead>
+      <tr><th>workload</th><th class="num">FP16</th><th class="num">INT4</th><th class="num">INT8</th><th class="num">EchoKV-3C</th><th class="num">avg bits</th><th>EchoKV's choice</th></tr>
+    </thead>
+    <tbody id="summaryTableBody"></tbody>
+  </table>
+
+  <h3>What the controller actually chose — real per-layer tier vectors</h3>
+
+  <p>Each strip below is the actual 80-layer bit-width assignment EchoKV
+  produced on Llama-3.1-70B at one seed of one workload — the
+  <strong>frozen post-warmup tier vector</strong> that was then held
+  constant across all measurement prompts for that workload (n=500
+  for GSM8K-Hard / HotpotQA, n=100 for RULER@128K, n=50 for τ-Bench
+  airline, n=115 for τ-Bench retail; see "Measurement protocol"
+  above for what "post-warmup" means). Cells are colored by the
+  chosen precision (red = INT2, blue = INT4, orange = INT8).
+  The pattern is markedly different per workload: RULER stays almost
+  entirely at INT4; τ-bench cascades to almost entirely INT8;
+  GSM8K-Hard is a mix and shifts between seeds.</p>
+
+  <div class="viz-wrap" style="margin-top:14px; position: relative;">
+    <p class="viz-title">Real tier vectors from our multi-seed runs (80 layers each)</p>
+    <svg id="tierVectorsSvg" viewBox="0 0 1000 480" preserveAspectRatio="xMidYMid meet" style="width:100%; height:auto; display:block;"></svg>
+    <div class="tv-tooltip" id="tierVectorTooltip"></div>
+    <div class="summary-row" style="margin-top:6px;">
+      <span class="legend-tier"><span class="swatch" style="background:var(--tier2)"></span>INT2</span>
+      <span class="legend-tier"><span class="swatch" style="background:var(--tier4)"></span>INT4</span>
+      <span class="legend-tier"><span class="swatch" style="background:var(--tier8)"></span>INT8</span>
+      <span style="margin-left:auto; font-size:13px; color:var(--muted);">hover a cell for the layer's tier &amp; workload</span>
+    </div>
+  </div>
+
+  <h3>Memory cost across workloads — one row per workload</h3>
+
+  <p>Each colored trace below is one workload, shown as its own
+  horizontal row. Markers along each row sit at the bit-widths of the
+  four substrates (FP16, INT4, INT8, EchoKV-3C). <strong>Left = less
+  memory.</strong> The bit-width EchoKV actually chose for that
+  workload is shown on the right.</p>
+
+  <div class="viz-wrap" style="padding: 14px 18px;">
+    <div id="paretoChart"></div>
+  </div>
+  <p class="results-caption">Click workload names in the legend below
+  to toggle visibility. Hover any marker for accuracy and config.</p>
+
+  <h2>Key takeaways</h2>
+
+  <p>Conventional KV-cache quantization fixes the bit-width
+  <em>before</em> the workload is known. You ship a model at static
+  INT4 (or INT8) and live with that choice across every task it sees:
+  hard math, multi-hop QA, long-context retrieval, tool-use agents,
+  short chat. But the per-layer sensitivity to quantization is not a
+  property of the model alone — it depends on what the model is
+  actually doing. A layer that is safe at INT2 on a 100-token
+  summarization request may be the layer that breaks a 50-turn
+  τ-bench retail agent.</p>
+
+  <p>EchoKV-3C inverts that contract. The bit-width assignment is
+  decided <em>at serving time</em>, per layer, from the live KL signal
+  the canary measures. The same deployment that runs at near-uniform
+  INT4 on RULER@128K cascades to near-uniform INT8 on τ-bench retail
+  — automatically, without re-quantizing the model, and without an
+  operator having to know in advance which task is "hard." Adaptation
+  isn't just <em>across</em> workloads either: within a single
+  workload the controller re-decides bits per prompt distribution
+  (on GSM8K-Hard the per-seed tier vector swings from 22 INT8 layers
+  up to 67 INT8 layers across the three seeds, depending on which
+  prompts each seed happened to sample). The controller's behavior
+  is content-driven — adaptive to the specific domain or task mix
+  the model is being asked to handle — so as the serving traffic
+  shifts (more agentic tool-use this quarter, more retrieval next
+  quarter, hard math vs. easy summarization within the same
+  endpoint), the per-layer assignment moves with it.</p>
+
+  <p>This matters because LLM-serving traffic is heterogeneous by
+  default. A single static bit-width is a bet that one number works
+  for every request the model will ever see. Adaptive per-layer
+  quantization replaces that bet with a measurement.</p>
+
+  <h2>Future work</h2>
+
+  <p>Several threads we left open, in order of how interesting we
+  think they are:</p>
+
+  <ul>
+    <li><strong>Why does the controller drift across seeds on
+    GSM8K-Hard?</strong> We localized this to numerical
+    nondeterminism in the canary's KL EMA at fp32 ULP scale,
+    amplified by argmin near the τ threshold: three independently
+    seeded GSM8K-Hard runs spread from 5.10 → 7.35 bits, with the
+    INT4/INT8 mix swinging from 58/22 to 13/67 layers (see chart
+    below). A controller with hysteresis or per-layer voting across
+    multiple canary firings should kill most of the drift — we have
+    the implementation but not the multi-seed data to back it up
+    yet.
+      <figure style="margin: 10px 0 4px; max-width: 620px;">
+        <svg viewBox="0 0 620 150" preserveAspectRatio="xMidYMid meet"
+             style="width:100%; height:auto; font-family: Inter, sans-serif;">
+          <!-- Layout: per-seed horizontal stacked bar, INT4 blue + INT8 orange,
+               normalized to 80 layers across a 320px-wide bar area. -->
+          <text x="6" y="14" font-size="11" font-weight="600" fill="#555" letter-spacing="0.03em">
+            GSM8K-HARD — PER-SEED TIER COMPOSITION (80 LAYERS)
+          </text>
+          <!-- bar x range: 70 to 390 (width 320), each cell width = 320/80 = 4 -->
+          <!-- seed 0: INT4=58, INT8=22 → bits 5.10 -->
+          <text x="60" y="44" text-anchor="end" font-size="11" fill="#333">seed 0</text>
+          <rect x="70"      y="32" width="232" height="18" fill="#1f77b4"/>
+          <rect x="302"     y="32" width="88"  height="18" fill="#ff7f0e"/>
+          <text x="396" y="44" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#444">
+            5.10 bits  •  {INT4:58, INT8:22}
+          </text>
+          <!-- seed 1: INT4=49, INT8=31 → bits 5.55 -->
+          <text x="60" y="74" text-anchor="end" font-size="11" fill="#333">seed 1</text>
+          <rect x="70"      y="62" width="196" height="18" fill="#1f77b4"/>
+          <rect x="266"     y="62" width="124" height="18" fill="#ff7f0e"/>
+          <text x="396" y="74" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#444">
+            5.55 bits  •  {INT4:49, INT8:31}
+          </text>
+          <!-- seed 2: INT4=13, INT8=67 → bits 7.35 -->
+          <text x="60" y="104" text-anchor="end" font-size="11" fill="#333">seed 2</text>
+          <rect x="70"      y="92" width="52"  height="18" fill="#1f77b4"/>
+          <rect x="122"     y="92" width="268" height="18" fill="#ff7f0e"/>
+          <text x="396" y="104" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#444">
+            7.35 bits  •  {INT4:13, INT8:67}
+          </text>
+          <!-- bottom axis (0 / 40 / 80 layer ticks) -->
+          <line x1="70" y1="116" x2="390" y2="116" stroke="#bbb"/>
+          <line x1="70"  y1="116" x2="70"  y2="119" stroke="#bbb"/>
+          <line x1="230" y1="116" x2="230" y2="119" stroke="#bbb"/>
+          <line x1="390" y1="116" x2="390" y2="119" stroke="#bbb"/>
+          <text x="70"  y="132" text-anchor="middle" font-size="10" fill="#888">0</text>
+          <text x="230" y="132" text-anchor="middle" font-size="10" fill="#888">40</text>
+          <text x="390" y="132" text-anchor="middle" font-size="10" fill="#888">80 layers</text>
+          <!-- legend -->
+          <rect x="70"  y="140" width="10" height="8" fill="#1f77b4"/>
+          <text x="84"  y="148" font-size="10" fill="#555">INT4</text>
+          <rect x="115" y="140" width="10" height="8" fill="#ff7f0e"/>
+          <text x="129" y="148" font-size="10" fill="#555">INT8</text>
+        </svg>
+      </figure>
+    </li>
+    <li><strong>Online $\tau$ adaptation.</strong> $\tau$ is currently
+    a fixed hyperparameter (with our $\sqrt{L}$ rescaling for context
+    length). A workload that mid-conversation switches from retrieval
+    to math reasoning should arguably tighten its budget. We have the
+    signal (per-layer $\hat{\delta}$ time series) but no decision rule
+    for changing $\tau$ on the fly.</li>
+    <li><strong>Upstreaming into vLLM.</strong> Our measurements use a
+    private vLLM fork at branch <code>feature/echokv-int4-cache</code>
+    that adds native per-token KIVI INT2/4/8 storage to the paged
+    attention path, plus the canary/controller hooks. The natural
+    next step is preparing a clean PR series for vLLM proper —
+    separating the per-token KIVI cache (broadly useful on its own)
+    from the EchoKV controller (the closed-loop logic). Static parity
+    is already confirmed against shadow-mode quantization (fork FP16
+    vs static INT4 paired McNemar n=1000, p=0.32), so the kernel side
+    is stable enough to merge once it's polished.</li>
+  </ul>
+
+  <h2>Code &amp; reproducing</h2>
+
+  <p>Everything in this post — the EchoKV-3C controller, the canary
+  estimator, the per-workload multi-seed scripts, the INT8 paired
+  baseline scripts, and the raw aggregate JSONs — lives in our public
+  repository:</p>
+
+  <p style="font-size:16px;">→ <a
+  href="https://github.com/nazar-ospanov/echokv"
+  target="_blank" rel="noopener"><strong>github.com/nazar-ospanov/echokv</strong></a></p>
+
+  <details class="math">
+    <summary>Show the reproduction recipe</summary>
+    <div class="math-body">
+      <p>Each workload has one tmux-launchable script under
+      <code>scripts/</code> that runs the full three-seed paired
+      protocol with all four substrates (FP16, static INT2, static
+      INT4, static INT8, EchoKV-3C) on identical prompts and writes
+      an <code>aggregate.json</code> with paired McNemar comparisons.
+      Each script is self-contained — there's no separate INT8 or
+      INT2 chain to run.</p>
+
+      <pre class="repro"><code><span class="c"># 1. clone and enter the repo</span>
+git clone https://github.com/nazar-ospanov/echokv.git
+cd echokv
+
+<span class="c"># 2. activate the pinned environment (vLLM 0.16.0 + torch 2.9.1)</span>
+conda activate echokv
+
+<span class="c"># 3. reproduce each workload — every script runs the full</span>
+<span class="c">#    FP16 / INT2 / INT4 / INT8 / EchoKV-3C sweep across 3 seeds</span>
+bash scripts/22_section63_emulation_multiseed.sh    <span class="c"># GSM8K-Hard</span>
+bash scripts/23_section64_hotpotqa_multiseed.sh     <span class="c"># HotpotQA</span>
+bash scripts/24_section65_ruler128k_multiseed.sh    <span class="c"># RULER@128K, τ=0.124</span>
+bash scripts/25_taubench_airline_multiseed.sh       <span class="c"># τ-Bench airline (TP=8)</span>
+bash scripts/26_taubench_retail_multiseed.sh        <span class="c"># τ-Bench retail (TP=8)</span>
+
+<span class="c"># 4. results land under results/serving/&lt;workload&gt;_repro/aggregate.json</span>
+<span class="c">#    (raw seed JSONs are alongside; the blog charts read from them)</span></code></pre>
+
+      <p>The aggregate JSONs contain per-seed FP16 / INT2 / INT4 /
+      INT8 / EchoKV accuracies, the per-seed bit-width budget, the
+      per-seed 80-element tier vector, and the paired McNemar
+      <em>p</em>-values used in the results section above. The exact
+      files driving every chart on this page are checked into the
+      repo.</p>
+    </div>
+  </details>
+
+</article>
+
+<footer>
+  EchoKV is a final project for Berkeley CS&nbsp;194-16 (Scalable AI),
+  Spring 2026, by Nazar Ospanov, Zoir Imomaliev,
+  Jason Trinh, and Sanjay Adhikesaven. Comments to
+  <a href="mailto:jasontrinh@berkeley.edu">jasontrinh@berkeley.edu</a>.
+</footer>
+
+<script>
+/* =========================================================================
+   Multi-seed data (inlined from results/serving/*_repro/aggregate.json)
+   ========================================================================= */
+const DATA = {
+  gsm8k_hard: {label: "GSM8K-Hard", n: 500, seeds: [
+    {seed:0, fp16:0.486, int4:0.464, int8:0.490, echokv:0.466, bits:5.10, tier:{4:58,8:22}},
+    {seed:1, fp16:0.496, int4:0.502, int8:0.500, echokv:0.512, bits:5.55, tier:{4:49,8:31}},
+    {seed:2, fp16:0.450, int4:0.438, int8:0.464, echokv:0.460, bits:7.35, tier:{4:13,8:67}}
+  ], means:{fp16:0.477, int4:0.468, int8:0.485, echokv:0.479, bits:6.00}},
+
+  hotpotqa: {label: "HotpotQA", n: 500, seeds: [
+    {seed:0, fp16:0.682, int4:0.680, int8:0.684, echokv:0.682, bits:4.60, tier:{4:68,8:12}},
+    {seed:1, fp16:0.694, int4:0.688, int8:0.696, echokv:0.680, bits:4.75, tier:{4:65,8:15}},
+    {seed:2, fp16:0.690, int4:0.682, int8:0.688, echokv:0.686, bits:5.10, tier:{4:58,8:22}}
+  ], means:{fp16:0.689, int4:0.683, int8:0.689, echokv:0.683, bits:4.82}},
+
+  ruler_128k: {label: "RULER@128K", n: 100, seeds: [
+    {seed:0, fp16:1.000, int4:1.000, int8:1.000, echokv:1.000, bits:3.98, tier:{2:1,4:79}},
+    {seed:1, fp16:1.000, int4:0.990, int8:1.000, echokv:1.000, bits:3.98, tier:{2:1,4:79}},
+    {seed:2, fp16:1.000, int4:0.990, int8:1.000, echokv:1.000, bits:3.98, tier:{2:1,4:79}}
+  ], means:{fp16:1.000, int4:0.993, int8:1.000, echokv:1.000, bits:3.98}},
+
+  taubench_airline: {label: "τ-Bench airline", n: 50, seeds: [
+    {seed:0, fp16:0.260, int4:0.200, int8:0.300, echokv:0.289, bits:7.85, tier:{4:3,8:77}},
+    {seed:1, fp16:0.260, int4:0.200, int8:0.300, echokv:0.222, bits:7.80, tier:{4:4,8:76}},
+    {seed:2, fp16:0.260, int4:0.200, int8:0.300, echokv:0.289, bits:7.85, tier:{4:3,8:77}}
+  ], means:{fp16:0.260, int4:0.200, int8:0.300, echokv:0.267, bits:7.83}},
+
+  taubench_retail: {label: "τ-Bench retail", n: 115, seeds: [
+    {seed:0, fp16:0.217, int4:0.200, int8:0.183, echokv:0.236, bits:7.95, tier:{4:1,8:79}},
+    {seed:1, fp16:0.217, int4:0.200, int8:0.183, echokv:0.236, bits:7.95, tier:{4:1,8:79}},
+    {seed:2, fp16:0.217, int4:0.200, int8:0.183, echokv:0.236, bits:7.95, tier:{4:1,8:79}}
+  ], means:{fp16:0.217, int4:0.200, int8:0.183, echokv:0.236, bits:7.95}}
+};
+
+/* Real per-layer tier vectors from results/serving/*_repro/seed{S}_echokv.json.
+   Each array of 80 entries is one (workload, seed) — the actual bit-width
+   assigned to each of the 80 layers in Llama-3.1-70B. */
+const TIER_VECTORS = {
+  gsm8k_hard: [
+    [4, 8, 8, 4, 8, 8, 8, 8, 8, 8, 4, 8, 8, 8, 8, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 8, 4, 8, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 8, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 8, 8, 8, 8, 8, 8, 8, 4, 4],
+    [4, 8, 8, 4, 8, 8, 8, 8, 8, 8, 4, 8, 8, 8, 8, 4, 4, 4, 4, 4, 4, 4, 4, 4, 8, 4, 4, 4, 8, 8, 4, 8, 4, 4, 8, 4, 4, 8, 4, 8, 4, 8, 8, 4, 4, 4, 8, 4, 4, 4, 4, 4, 4, 4, 4, 4, 8, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 8, 8, 8, 8, 8, 8, 8, 8, 4],
+    [4, 8, 8, 4, 8, 8, 8, 4, 8, 8, 4, 8, 4, 8, 8, 4, 4, 8, 8, 4, 4, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 4, 8, 8, 8, 8, 8, 8, 8, 8, 4, 4, 8, 8, 8, 4, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8]
+  ],
+  hotpotqa: [
+    [4, 4, 8, 4, 4, 8, 4, 8, 8, 8, 4, 4, 4, 4, 8, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 8, 4, 4, 4, 8, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 8, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 8, 4, 4, 4, 8, 4, 8, 4, 4],
+    [4, 8, 4, 4, 8, 8, 8, 8, 8, 4, 4, 4, 4, 4, 8, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 8, 4, 8, 4, 4, 4, 8, 8, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 8, 4, 4, 4, 4, 8, 8, 4, 4, 8, 4, 4, 4, 4],
+    [4, 4, 8, 4, 8, 8, 8, 8, 8, 8, 4, 4, 8, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 8, 4, 4, 4, 8, 4, 8, 4, 4, 4, 8, 4, 4, 4, 4, 8, 8, 4, 4, 4, 4, 8, 8, 4, 4, 8, 4, 4, 4, 8, 4, 4, 4, 8, 4, 4, 4, 4, 4, 4, 8, 8, 4, 4, 8, 4, 4, 4, 4]
+  ],
+  ruler_128k: [
+    [2, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+    [2, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+    [2, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4]
+  ],
+  taubench_airline: [
+    [4, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 4, 8, 8, 8, 8, 8, 8, 8, 8, 8, 4, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8],
+    [4, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 4, 8, 8, 8, 8, 8, 8, 8, 4, 8, 4, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8],
+    [4, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 4, 8, 8, 8, 8, 8, 8, 8, 8, 8, 4, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8]
+  ],
+  taubench_retail: [
+    [4, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8],
+    [4, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8],
+    [4, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8]
+  ]
+};
+
+const WORKLOAD_NOTES = {
+  gsm8k_hard: "Multi-step arithmetic. Seed-to-seed spread is wide: the controller's bit allocation varies 5.10–7.35 bits across seeds, and the published 0.488 cell sits at one favorable point.",
+  hotpotqa: "Multi-hop QA. INT4 already matches FP16 within 0.006, so all substrates land at ~0.683–0.689. EchoKV stays near-uniform INT4 (4.82 bits, 70% savings) — same as static INT4.",
+  ruler_128k: "Long-context retrieval. All substrates saturate at 1.000 accuracy. EchoKV stays at near-uniform INT4 with one INT2 layer mixed in — 3.98 bits, 75% savings. Byte-identical across seeds.",
+  taubench_airline: "Tool-use agent (50 tasks). The first workload with a meaningful FP16-INT4 gap (0.060). EchoKV cascades to ~96% INT8 to close it; static INT8 (0.300) actually does the job slightly better than EchoKV (0.267).",
+  taubench_retail: "Tool-use agent (115 tasks). EchoKV beats every static substrate: 0.236 vs FP16 0.217, INT8 0.183, INT4 0.200. The controller's allocation is byte-identical across seeds."
+};
+
+/* =========================================================================
+   PART 1 — Interactive mechanism animation
+   ========================================================================= */
+(function () {
+  const NUM_LAYERS = 20;
+  const TAU = 0.022;        // divergence budget
+  const TAU_DOWN_INT2 = 0.011; // looser for INT2 downgrade
+
+  const SAMPLE_TOKENS = {
+    gsm8k: "John bought 23 apples for $1.45 each and 47 oranges for $0.89 each. The store offered a 12% discount on the total. Let me calculate: 23 × 1.45 = 33.35, and 47 × 0.89 = ".split(/(?<=\s)/),
+    hotpotqa: "Q: Which film featured the actor who starred in both 'The Departed' and 'Inception'? A: The actor in question is Leonardo DiCaprio, who appeared in 'The Departed' (2006) and ".split(/(?<=\s)/),
+    ruler: "The magic number hidden in the document above is 916294. Write it down somewhere safe. Q: What is the magic number mentioned in the passage? A: The magic number is ".split(/(?<=\s)/),
+    taubench: "User: I'd like to book a flight from SFO to JFK on Friday. Agent: I'll help you with that. Let me search for available flights. [tool_call: search_flights(origin=SFO, dest=JFK, date=Friday)] [tool_response: 3 results] Found three options: ".split(/(?<=\s)/)
+  };
+
+  // Per-workload "intrinsic sensitivity" — drives the canary KL bars and
+  // therefore the tier the controller picks. Each workload uses its own
+  // mix of four kinds of layers:
+  //   • int2Prob  — very low sens (always INT2)         used by RULER only
+  //   • int4Prob  — low sens (stays INT4 even on hot workloads)
+  //   • spikeProb — high sens (always INT8)
+  //   • otherwise — sens near τ, FLIPS across firings (the visible churn)
+  //
+  // The "normal" band is intentionally centered around τ so jitter on each
+  // canary firing flips some layers between INT4 and INT8 — the reader sees
+  // the controller *actively* re-deciding, not a frozen vector.
+  function makeSensitivities(workload) {
+    const rng = mulberry32(workload === "gsm8k" ? 17 :
+                          workload === "hotpotqa" ? 99 :
+                          workload === "ruler" ? 4 : 222);
+    const s = new Array(NUM_LAYERS);
+    const ranges = {
+      // gsm8k: large fraction at the τ boundary → many layers flip per firing
+      gsm8k:    {base: 0.018, spread: 0.018, spikeProb: 0.28, int4Prob: 0.0,  int2Prob: 0.0},
+      // hotpotqa: mostly INT4-stable, a few INT8 spikes, modest near-τ band
+      hotpotqa: {base: 0.012, spread: 0.014, spikeProb: 0.15, int4Prob: 0.0,  int2Prob: 0.0},
+      // ruler: most layers well below τ → stable INT4. A few very-low-sens
+      //         layers drop to INT2; rare INT8 spike.
+      ruler:    {base: 0.006, spread: 0.010, spikeProb: 0.03, int4Prob: 0.0,  int2Prob: 0.12},
+      // taubench: most layers well above τ → stable INT8. A couple of
+      //            low-sens layers stay INT4 (matches the real tier vector).
+      taubench: {base: 0.028, spread: 0.022, spikeProb: 0.65, int4Prob: 0.12, int2Prob: 0.0},
+    }[workload];
+    for (let i = 0; i < NUM_LAYERS; i++) {
+      const middleBoost = 1.0 + 0.3 * Math.exp(-Math.pow((i - 10) / 5, 2));
+      const r = rng();
+      let base;
+      if (r < ranges.int2Prob) {
+        // Very low — kl2 lands below TAU_DOWN_INT2.
+        base = 0.0003 + rng() * 0.0006;
+      } else if (r < ranges.int2Prob + ranges.int4Prob) {
+        // Low — stays INT4 even on hot workloads.
+        base = 0.004 + rng() * 0.004;
+      } else if (r < ranges.int2Prob + ranges.int4Prob + ranges.spikeProb) {
+        // Spike — well above τ, always INT8.
+        base = 0.05 + rng() * 0.05;
+      } else {
+        // Normal — straddles τ, so jitter on each firing flips the tier.
+        base = ranges.base + ranges.spread * rng();
+      }
+      s[i] = base * middleBoost;
+    }
+    return s;
+  }
+
+  function mulberry32(a) {
+    return function() {
+      let t = a += 0x6D2B79F5;
+      t = Math.imul(t ^ t >>> 15, t | 1);
+      t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    }
+  }
+
+  function klFor(sens, bits, jitter, rng) {
+    // KL grows roughly as 1 / bits²; INT2 is much worse than INT4 is much worse than INT8.
+    const scale = { 2: 8.0, 4: 1.0, 8: 0.05 }[bits];
+    return Math.max(0, sens * scale + jitter * (rng() - 0.5) * sens * scale);
+  }
+
+  function chooseTier(kl2, kl4, kl8) {
+    if (kl2 < TAU_DOWN_INT2) return 2; // safe enough at INT2
+    if (kl4 < TAU) return 4;
+    return 8;
+  }
+
+  // State
+  const state = {
+    workload: "gsm8k",
+    tiers: new Array(NUM_LAYERS).fill(16),
+    sensitivities: null,
+    rng: null,
+    step: 0,
+    tokenIdx: 0,
+    phase: "decode", // "decode" | "canary_fire" | "canary_decide" | "transition"
+    phaseFrame: 0,
+    klValues: null, // {kl2:[], kl4:[], kl8:[]}
+    playing: false,
+    speed: 2,
+    timer: null,
+  };
+
+  function resetForWorkload(workload) {
+    state.workload = workload;
+    state.sensitivities = makeSensitivities(workload);
+    state.rng = mulberry32(workload === "gsm8k" ? 17 :
+                           workload === "hotpotqa" ? 99 :
+                           workload === "ruler" ? 4 : 222);
+    state.step = 0;
+    state.tokenIdx = 0;
+    state.phase = "decode";
+    state.phaseFrame = 0;
+    state.klValues = null;
+    // seed all layers at FP16 (uncompressed — controller hasn't fired yet)
+    state.tiers = new Array(NUM_LAYERS).fill(16);
+    document.getElementById("tokensRow").innerHTML =
+      '<span style="color:#aaa;">' + (
+        SAMPLE_TOKENS[workload].slice(0, 3).join("") + "..."
+      ).trim() + '</span>';
+    document.getElementById("workloadName").textContent = ({
+      gsm8k: "GSM8K-Hard", hotpotqa: "HotpotQA", ruler: "RULER@128K", taubench: "τ-Bench"
+    })[workload];
+    render();
+  }
+
+  function appendToken() {
+    const seq = SAMPLE_TOKENS[state.workload];
+    if (state.tokenIdx >= seq.length) state.tokenIdx = 0;
+    const tokensRow = document.getElementById("tokensRow");
+    // Build the text up to current index, with the latest token highlighted briefly
+    let visible = seq.slice(0, state.tokenIdx + 1).join("");
+    // Trim from start if too long
+    if (visible.length > 320) visible = "…" + visible.slice(visible.length - 320);
+    tokensRow.innerHTML = visible.slice(0, -seq[state.tokenIdx].length) +
+        `<span class="new-tok">${seq[state.tokenIdx]}</span>`;
+    state.tokenIdx++;
+  }
+
+  function fireCanary() {
+    // Compute KL per layer for INT2 / INT4 / INT8. Jitter is ±25% of the
+    // nominal KL so that "normal" (near-τ) layers visibly flip between
+    // INT4 and INT8 across firings — the controller is doing live work,
+    // not freezing on the first decision.
+    const kl2 = [], kl4 = [], kl8 = [];
+    for (let i = 0; i < NUM_LAYERS; i++) {
+      const s = state.sensitivities[i];
+      kl2.push(klFor(s, 2, 0.5, state.rng));
+      kl4.push(klFor(s, 4, 0.5, state.rng));
+      kl8.push(klFor(s, 8, 0.5, state.rng));
+    }
+    state.klValues = {kl2, kl4, kl8};
+  }
+
+  function applyDecision() {
+    if (!state.klValues) return;
+    const {kl2, kl4, kl8} = state.klValues;
+    for (let i = 0; i < NUM_LAYERS; i++) {
+      state.tiers[i] = chooseTier(kl2[i], kl4[i], kl8[i]);
+    }
+  }
+
+  function tick() {
+    if (state.phase === "decode") {
+      appendToken();
+      state.step++;
+      state.phaseFrame++;
+      if (state.phaseFrame >= 6) {
+        // Fire canary
+        state.phase = "canary_fire";
+        state.phaseFrame = 0;
+        fireCanary();
+      }
+    } else if (state.phase === "canary_fire") {
+      state.phaseFrame++;
+      if (state.phaseFrame >= 3) {
+        state.phase = "canary_decide";
+        state.phaseFrame = 0;
+      }
+    } else if (state.phase === "canary_decide") {
+      state.phaseFrame++;
+      if (state.phaseFrame >= 2) {
+        applyDecision();
+        state.phase = "transition";
+        state.phaseFrame = 0;
+      }
+    } else if (state.phase === "transition") {
+      state.phaseFrame++;
+      if (state.phaseFrame >= 2) {
+        state.phase = "decode";
+        state.phaseFrame = 0;
+        state.klValues = null;
+      }
+    }
+    render();
+  }
+
+  function render() {
+    document.getElementById("stepNum").textContent = state.step;
+
+    const led = document.getElementById("canaryLed");
+    const status = document.getElementById("statusText");
+    if (state.phase === "decode") {
+      led.classList.remove("firing");
+      status.textContent = "Decoding…";
+    } else if (state.phase === "canary_fire") {
+      led.classList.add("firing");
+      status.textContent = "Canary fired: measuring per-layer divergence";
+    } else if (state.phase === "canary_decide") {
+      led.classList.add("firing");
+      status.textContent = "Controller picks new bit-widths…";
+    } else {
+      led.classList.remove("firing");
+      status.textContent = "Tiers updated";
+    }
+
+    drawLayers();
+    updateSummary();
+  }
+
+  function drawLayers() {
+    const svg = document.getElementById("layerSvg");
+    const W = 1000, H = 280;
+    // Wider left margin so the rotated KL axis label clears the bar area.
+    const margin = {left: 60, right: 30, top: 20, bottom: 50};
+    const innerW = W - margin.left - margin.right;
+    const innerH = H - margin.top - margin.bottom;
+    const colWidth = innerW / NUM_LAYERS;
+    const tierBarHeight = 28;
+    const klArea = innerH - tierBarHeight - 6;
+    const tierColors = {2: "#d62728", 4: "#1f77b4", 8: "#ff7f0e", 16: "#555555"};
+
+    // Log-scale display so INT8 KL (tiny) and INT2 KL (large) are
+    // visible side-by-side. We map a fixed decade window [10^-3, 10^0]
+    // to the chart area; bars below the floor get rendered at 0 height.
+    const LOG_KL_MIN = -3;  // log10 of 0.001
+    const LOG_KL_MAX = 0;   // log10 of 1.0
+    const logRange = LOG_KL_MAX - LOG_KL_MIN;
+    function barHeight(kl) {
+      const logV = Math.log10(Math.max(kl, 1e-6));
+      if (logV <= LOG_KL_MIN) return 0;
+      return klArea * (Math.min(logV, LOG_KL_MAX) - LOG_KL_MIN) / logRange;
+    }
+
+    let svgHtml = "";
+
+    // background grid (subtle)
+    svgHtml += `<line x1="${margin.left}" y1="${margin.top + klArea}" x2="${W - margin.right}" y2="${margin.top + klArea}" stroke="#ddd" stroke-width="1"/>`;
+
+    // Log-scale gridlines + tick labels at 10^-3, 10^-2, 10^-1, 10^0.
+    // Always visible so the reader sees the y-axis even when no bars are drawn.
+    for (const dec of [-3, -2, -1, 0]) {
+      const y = margin.top + klArea - klArea * (dec - LOG_KL_MIN) / logRange;
+      svgHtml += `<line x1="${margin.left}" y1="${y}" x2="${W - margin.right}" y2="${y}" stroke="#eee" stroke-width="1"/>`;
+      svgHtml += `<text x="${margin.left - 6}" y="${y + 3.5}" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="9.5" fill="#999">10${dec === 0 ? "⁰" : (dec === -1 ? "⁻¹" : (dec === -2 ? "⁻²" : "⁻³"))}</text>`;
+    }
+
+    // Persistent y-axis label — moved well inside the viewBox so it's not
+    // clipped. Rotated around (20, midY), with a wider left margin to give
+    // it room.
+    svgHtml += `<text x="20" y="${margin.top + klArea / 2}" font-family="Inter, sans-serif" font-size="11" fill="#444" font-weight="600" transform="rotate(-90, 20, ${margin.top + klArea / 2})" text-anchor="middle">KL divergence (log scale)</text>`;
+    // Tier-band label at the bottom-left so the row of colored cells is named.
+    svgHtml += `<text x="${margin.left - 6}" y="${margin.top + klArea + tierBarHeight / 2 + 11}" text-anchor="end" font-family="Inter, sans-serif" font-size="10" fill="#666">tier</text>`;
+
+    // While a canary is firing, compute the tier vector the controller
+    // WOULD pick if we applied the decision right now. Comparing this
+    // "pending" vector to the current tier vector lets us highlight cells
+    // that are about to change BEFORE the change is applied, so the reader
+    // sees the cause→effect link.
+    let pendingTiers = null;
+    if (state.klValues && (state.phase === "canary_fire" || state.phase === "canary_decide")) {
+      const {kl2, kl4, kl8} = state.klValues;
+      pendingTiers = state.tiers.map((_, i) => chooseTier(kl2[i], kl4[i], kl8[i]));
+    }
+
+    // Highlight pass: for each layer about to change, paint a translucent
+    // gold column that covers BOTH the KL-bar area AND the tier band. Drawn
+    // BEFORE the bars/tier rects so the bars sit on top and remain legible
+    // — readers see a vertical "spotlight" linking the high KL bars (cause)
+    // to the tier cell that's about to flip (effect).
+    if (pendingTiers) {
+      for (let i = 0; i < NUM_LAYERS; i++) {
+        if (pendingTiers[i] !== state.tiers[i]) {
+          const xL = margin.left + i * colWidth;
+          const colH = klArea + tierBarHeight + 10;
+          svgHtml += `<rect x="${xL}" y="${margin.top - 2}" width="${colWidth}" height="${colH}" fill="#f4c542" opacity="0.20" rx="2"/>`;
+        }
+      }
+    }
+
+    // KL bars (only when canary is in fire/decide phase)
+    if (state.klValues && (state.phase === "canary_fire" || state.phase === "canary_decide")) {
+      const {kl2, kl4, kl8} = state.klValues;
+      const tauY = margin.top + klArea - barHeight(TAU);
+
+      // Each layer's column gets 3 wide bars (INT2, INT4, INT8), separated by small gaps
+      const barGap = 1.5;
+      const innerColPadding = 2;
+      const usableW = colWidth - 2 * innerColPadding;
+      const barW = (usableW - 2 * barGap) / 3;
+      for (let i = 0; i < NUM_LAYERS; i++) {
+        const xL = margin.left + i * colWidth + innerColPadding;
+        const k2y = barHeight(kl2[i]);
+        const k4y = barHeight(kl4[i]);
+        const k8y = barHeight(kl8[i]);
+        svgHtml += `<rect x="${xL}" y="${margin.top + klArea - k2y}" width="${barW}" height="${k2y}" fill="${tierColors[2]}" opacity="0.9" rx="0.5"/>`;
+        svgHtml += `<rect x="${xL + barW + barGap}" y="${margin.top + klArea - k4y}" width="${barW}" height="${k4y}" fill="${tierColors[4]}" opacity="0.9" rx="0.5"/>`;
+        svgHtml += `<rect x="${xL + 2 * (barW + barGap)}" y="${margin.top + klArea - k8y}" width="${barW}" height="${k8y}" fill="${tierColors[8]}" opacity="0.9" rx="0.5"/>`;
+      }
+      // Threshold line — y-position is log-scaled like everything else.
+      svgHtml += `<line x1="${margin.left}" y1="${tauY}" x2="${W - margin.right}" y2="${tauY}" stroke="#222" stroke-width="1.8" stroke-dasharray="6 4"/>`;
+      svgHtml += `<rect x="${W - margin.right - 60}" y="${tauY - 18}" width="60" height="14" fill="white" stroke="#222" stroke-width="1"/>`;
+      svgHtml += `<text x="${W - margin.right - 30}" y="${tauY - 7}" text-anchor="middle" font-family="Inter, sans-serif" font-size="11" fill="#222">τ = ${TAU}</text>`;
+    }
+
+    // Tier row (always shown at the bottom of the chart area). Cells in
+    // changing columns also get a small ↑/↓ arrow above the tier cell so
+    // the direction (promote / demote) is unambiguous. The gold column
+    // spotlight from the highlight pass above already marks WHICH layers
+    // are changing; the arrow indicates WHICH WAY.
+    for (let i = 0; i < NUM_LAYERS; i++) {
+      const xL = margin.left + i * colWidth + 1;
+      const yT = margin.top + klArea + 6;
+      const color = tierColors[state.tiers[i]];
+      svgHtml += `<rect x="${xL}" y="${yT}" width="${colWidth - 2}" height="${tierBarHeight}" fill="${color}" rx="1.5"/>`;
+
+      if (pendingTiers && pendingTiers[i] !== state.tiers[i]) {
+        // Direction arrow just above the cell. Up = promoting (more bits),
+        // down = demoting (fewer bits). FP16(16) → anything is a down arrow.
+        const arrow = pendingTiers[i] > state.tiers[i] && state.tiers[i] !== 16 ? "↑" : "↓";
+        svgHtml += `<text x="${xL + (colWidth - 2) / 2}" y="${yT - 4}" text-anchor="middle" font-family="Inter, sans-serif" font-size="12" font-weight="700" fill="#7a5800">${arrow}</text>`;
+      }
+    }
+
+    // Layer labels (every 4 layers)
+    for (let i = 0; i < NUM_LAYERS; i += 4) {
+      const xL = margin.left + i * colWidth + colWidth / 2;
+      svgHtml += `<text x="${xL}" y="${H - 20}" text-anchor="middle" font-family="Inter, sans-serif" font-size="11" fill="#888">L${i}</text>`;
+    }
+    svgHtml += `<text x="${margin.left}" y="${H - 5}" text-anchor="start" font-family="Inter, sans-serif" font-size="11" fill="#666">model layers (early → late)</text>`;
+
+    svg.innerHTML = svgHtml;
+  }
+
+  function updateSummary() {
+    const counts = {2: 0, 4: 0, 8: 0, 16: 0};
+    for (const t of state.tiers) counts[t]++;
+    const avg = (counts[2] * 2 + counts[4] * 4 + counts[8] * 8 + counts[16] * 16) / NUM_LAYERS;
+    document.getElementById("avgBits").textContent = avg.toFixed(2);
+    const savings = (16 - avg) / 16 * 100;
+    document.getElementById("memSavings").textContent = savings.toFixed(1) + "%";
+  }
+
+  // Wire controls
+  document.getElementById("btnPlay").addEventListener("click", () => {
+    state.playing = !state.playing;
+    const btn = document.getElementById("btnPlay");
+    if (state.playing) {
+      btn.textContent = "⏸ Pause";
+      btn.classList.add("active");
+      schedule();
+    } else {
+      btn.textContent = "▶ Play";
+      btn.classList.remove("active");
+      if (state.timer) { clearInterval(state.timer); state.timer = null; }
+    }
+  });
+  document.getElementById("btnStep").addEventListener("click", () => {
+    if (state.playing) document.getElementById("btnPlay").click();
+    tick();
+  });
+  document.getElementById("btnReset").addEventListener("click", () => {
+    if (state.playing) document.getElementById("btnPlay").click();
+    resetForWorkload(state.workload);
+  });
+  document.getElementById("speed").addEventListener("change", (e) => {
+    state.speed = parseFloat(e.target.value);
+    if (state.playing) schedule();
+  });
+  document.getElementById("workloadSelect").addEventListener("change", (e) => {
+    resetForWorkload(e.target.value);
+  });
+
+  function schedule() {
+    if (state.timer) clearInterval(state.timer);
+    const interval = Math.round(450 / state.speed);
+    state.timer = setInterval(tick, interval);
+  }
+
+  resetForWorkload("gsm8k");
+  // Auto-start playback so visitors see the mechanism running immediately.
+  document.getElementById("btnPlay").click();
+})();
+
+/* =========================================================================
+   PART 1b — K_ref ring buffer animation
+   A small standalone animation showing the 64-cell ring buffer sliding
+   as new tokens arrive. Periodically the canary "fires" — the whole
+   strip flashes gold and a label notes that KL is measured against
+   exactly the 64 cells currently in the ring (no full FP16 cache).
+   ========================================================================= */
+(function () {
+  const RING_SIZE = 64;          // conceptual K_ref capacity (referenced in banner)
+  const DISPLAY_CELLS = 128;     // total visual extent of the strip
+  const PREFILL_CELLS = 16;      // pre-loaded "prompt" K's at the left, shown muted gray
+  const DECODE_TICKS = DISPLAY_CELLS - PREFILL_CELLS;  // 112 decode ticks per cycle
+  const TOTAL_TICKS = DECODE_TICKS;
+  const TICK_MS = 170;           // faster cadence so the strip fills in ~20s
+  const CANARY_HOLD = 3;         // canary-fire phase lasts 3 ticks visually
+  const END_HOLD    = 6;         // brief pause at the end of the cycle before restarting
+  // Canary firing is scheduled with a per-fire random interval in
+  // [FIRE_MIN, FIRE_MAX] decode ticks. This makes firing visibly periodic
+  // (no clustered bursts at the start) while still not looking like a
+  // metronome.
+  const FIRE_MIN = 16;
+  const FIRE_MAX = 24;
+  const FIRE_FIRST_MIN = 12;     // first fire is a little earlier so users see it quickly
+  const FIRE_FIRST_MAX = 18;
+
+  // Small deterministic RNG. Reseeded each loop so successive cycles
+  // aren't identical.
+  let rngSeed = 0x12345;
+  function rand() {
+    rngSeed = (Math.imul(rngSeed, 1664525) + 1013904223) | 0;
+    return ((rngSeed >>> 0) / 0xffffffff);
+  }
+  function pickFireStep(currentStep, isFirst) {
+    const lo = isFirst ? FIRE_FIRST_MIN : FIRE_MIN;
+    const hi = isFirst ? FIRE_FIRST_MAX : FIRE_MAX;
+    return currentStep + lo + Math.floor(rand() * (hi - lo + 1));
+  }
+
+  const state = {
+    step: 0,
+    phase: "decode",
+    phaseFrames: 0,
+    nextFireStep: 0,  // initialised at first render below
+  };
+  state.nextFireStep = pickFireStep(0, true);
+
+  function render() {
+    const svg = document.getElementById("kbSvg");
+    if (!svg) return;
+    const W = 1000, H = 240;
+    // Margins sized so the right-edge "new K_ℓ" callout clears the viewBox.
+    // cellAreaW = 1000 - 40 - 90 = 870 → 128 cells × ~6.8 px each.
+    const margin = {left: 40, right: 90, top: 22, bottom: 50};
+    const cellAreaW = W - margin.left - margin.right;
+    const cellW = cellAreaW / DISPLAY_CELLS;
+    const cellH = 56;
+    const cellY = 152;  // pushed down so strip label / K_ref bracket /
+                        // ↓ decode-starts arrow can stack cleanly above
+                        // without overlapping, and the arrow ends up
+                        // immediately above the dashed divider line.
+
+    // Q region (always shown above the strip)
+    const qWidth = 110, qHeight = 30;
+    const qX = margin.left + cellAreaW / 2 - qWidth / 2;
+    const qY = 24;
+    const qCenterX = qX + qWidth / 2;
+    const qBottomY = qY + qHeight;
+
+    const isCanary = state.phase === "canary";
+
+    // Strip layout: [PREFILL_CELLS prompt K's, always shown] [decode cells, grow].
+    // K_ref always holds at most the 64 most recent K's. Once total K's
+    // seen exceeds 64, older cells are "evicted from K_ref" — we keep
+    // drawing them at the left for timeline context but render them
+    // dimmed, so the live ring window is visible as a brighter band on
+    // the right.
+    const decodeCount = Math.min(state.step + 1, DECODE_TICKS);
+    const visibleCells = PREFILL_CELLS + decodeCount;
+    const isComplete = decodeCount >= DECODE_TICKS;
+    const rightEdgeX = margin.left + visibleCells * cellW;
+    const ringContents = Math.min(visibleCells, RING_SIZE);
+    const inRingStart = Math.max(0, visibleCells - RING_SIZE);
+
+    let html = "";
+
+    // ── Q cell (always shown) — represents the current decode-step query ──
+    html += `<text x="${qCenterX}" y="${qY - 8}" text-anchor="middle" font-family="Inter, sans-serif" font-size="10" font-style="italic" fill="#666">Q (current decode-step query)</text>`;
+    const qFill   = isCanary ? "#f4c542" : "#e8f0ff";
+    const qStroke = isCanary ? "#7a5800" : "#1f77b4";
+    html += `<rect x="${qX}" y="${qY}" width="${qWidth}" height="${qHeight}" fill="${qFill}" stroke="${qStroke}" stroke-width="1.4" rx="3" opacity="${isCanary ? 0.95 : 0.85}"/>`;
+    html += `<text x="${qCenterX}" y="${qY + qHeight / 2 + 4}" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="12" font-weight="700" fill="${isCanary ? "#7a5800" : "#1f77b4"}">Q</text>`;
+
+    // ── Fan-out lines from Q to each IN-RING K cell (only during canary).
+    // Only the rightmost ≤64 cells are in K_ref; lines only connect to
+    // those, so the reader sees that KL is measured exclusively on the
+    // ring contents.
+    if (isCanary) {
+      for (let i = inRingStart; i < visibleCells; i++) {
+        const kCenterX = margin.left + i * cellW + cellW / 2;
+        html += `<line x1="${qCenterX}" y1="${qBottomY}" x2="${kCenterX}" y2="${cellY}" stroke="#daa520" stroke-width="0.7" opacity="0.4"/>`;
+      }
+    }
+
+    // Cell render: prefill (gray) + decode (gold); cells outside the
+    // ring window are drawn dimmed to indicate they've been evicted.
+    for (let i = 0; i < visibleCells; i++) {
+      const isPrefill = i < PREFILL_CELLS;
+      const isInRing = i >= inRingStart;
+      const cx = margin.left + i * cellW;
+      const isNewest = i === visibleCells - 1 && !isPrefill;
+      let fill, stroke;
+      if (isCanary && isInRing) {
+        fill = "#f4c542"; stroke = "#7a5800";
+      } else if (isPrefill) {
+        fill = "#e8e8e8"; stroke = "#aaa";
+      } else {
+        fill = "#fff8dc"; stroke = "#daa520";
+      }
+      const cellOpacity = isInRing ? (isCanary ? 0.92 : 0.85) : 0.28;
+      html += `<rect x="${cx + 0.3}" y="${cellY}" width="${cellW - 0.6}" height="${cellH}" fill="${fill}" stroke="${stroke}" stroke-width="${isNewest ? 1.3 : 0.5}" rx="1" opacity="${cellOpacity}"/>`;
+      // Token-number labels: prefill section gets a single centered "prompt"
+      // label; decode section gets per-16-cell tick labels.
+      if (!isPrefill) {
+        const decodeTok = i - PREFILL_CELLS;
+        if (decodeTok % 16 === 0 || isNewest) {
+          const labelOpacity = isInRing ? 1.0 : 0.45;
+          html += `<text x="${cx + cellW / 2}" y="${cellY + cellH + 14}" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#7a5800" opacity="${labelOpacity}">tok ${decodeTok}</text>`;
+        }
+      }
+    }
+
+    // "prompt context" label centered under the prefill region
+    const prefillCenterX = margin.left + (PREFILL_CELLS * cellW) / 2;
+    html += `<text x="${prefillCenterX}" y="${cellY + cellH + 14}" text-anchor="middle" font-family="Inter, sans-serif" font-size="10" font-style="italic" fill="#888">prompt context</text>`;
+
+    // Vertical separator between prefill and decode regions. The dashed
+    // line now extends UP all the way to just under the ↓ arrow so the
+    // arrow and the line read as one continuous indicator.
+    const dividerX = margin.left + PREFILL_CELLS * cellW;
+    html += `<line x1="${dividerX}" y1="${cellY - 14}" x2="${dividerX}" y2="${cellY + cellH + 6}" stroke="#999" stroke-width="0.8" stroke-dasharray="3 2"/>`;
+    // ↓ decode-starts arrow sits IMMEDIATELY above the dashed line top,
+    // centered on the same x — so it visually flows into the line.
+    html += `<text x="${dividerX}" y="${cellY - 18}" text-anchor="middle" font-family="Inter, sans-serif" font-size="10" fill="#666">↓ decode starts</text>`;
+
+    // Bracket above the arrow marking the in-ring window (the rightmost
+    // ringContents cells). Only drawn once the strip has more than
+    // RING_SIZE cells, i.e. when there's an actual distinction between
+    // "in ring" and "evicted" cells.
+    if (visibleCells > RING_SIZE) {
+      const ringStartX = margin.left + inRingStart * cellW;
+      const ringEndX   = margin.left + visibleCells * cellW;
+      const bracketY   = cellY - 39;
+      html += `<path d="M ${ringStartX} ${bracketY + 4} L ${ringStartX} ${bracketY} L ${ringEndX} ${bracketY} L ${ringEndX} ${bracketY + 4}" fill="none" stroke="#7a5800" stroke-width="1"/>`;
+      html += `<text x="${(ringStartX + ringEndX) / 2}" y="${bracketY - 3}" text-anchor="middle" font-family="Inter, sans-serif" font-size="10" font-weight="600" fill="#7a5800">K_ref: ${ringContents} / ${RING_SIZE}</text>`;
+    }
+
+    // Dotted outline of the not-yet-decoded slots so the reader sees
+    // how long the timeline will run before the loop resets.
+    if (!isComplete) {
+      for (let i = visibleCells; i < DISPLAY_CELLS; i++) {
+        const cx = margin.left + i * cellW;
+        html += `<rect x="${cx + 0.3}" y="${cellY}" width="${cellW - 0.6}" height="${cellH}" fill="none" stroke="#e0c87a" stroke-width="0.5" stroke-dasharray="2 2" rx="1" opacity="0.4"/>`;
+      }
+    }
+
+    // Strip label above the cells. During canary fire, this position
+    // shows the KL formula + live ring count instead.
+    let stripLabel;
+    if (isCanary) {
+      stripLabel = `<tspan fill="#7a5800" font-weight="700">canary fires →</tspan> <tspan fill="#7a5800">KL( softmax(Q·K_ref) ‖ softmax(Q·quant_b(K_ref)) ) on the ${ringContents} key${ringContents === 1 ? "" : "s"} in K_ref</tspan>`;
+    } else if (isComplete) {
+      stripLabel = `${PREFILL_CELLS} prompt K's + ${DECODE_TICKS} decoded — restarting…`;
+    } else {
+      stripLabel = `${PREFILL_CELLS} prompt K's loaded · decoding: ${decodeCount} tokens so far`;
+    }
+    html += `<text x="${margin.left}" y="${cellY - 68}" font-family="Inter, sans-serif" font-size="12" fill="#444" font-weight="600">${stripLabel}</text>`;
+
+    // "new K" annotation on the RIGHT — tracks the right edge of the
+    // currently-filled cells, so it moves with the growing strip during
+    // fill and then settles at the far right once we're sliding.
+    html += `<path d="M ${rightEdgeX + 28} ${cellY + cellH / 2} l -28 0" stroke="#1f77b4" stroke-width="1.8" fill="none" marker-end="url(#kbArrowIn)"/>`;
+    html += `<text x="${rightEdgeX + 32}" y="${cellY + cellH / 2 - 6}" font-family="Inter, sans-serif" font-size="11" fill="#1f77b4" font-weight="600">new K_ℓ</text>`;
+    html += `<text x="${rightEdgeX + 32}" y="${cellY + cellH / 2 + 7}" font-family="Inter, sans-serif" font-size="10" fill="#1f77b4">(FP16)</text>`;
+
+    // (canary banner inlined into the strip label above, since Q now
+    // occupies the y=6–52 region that the old banner used)
+
+    // Defs for arrow markers (re-emitted each render — cheap)
+    html = `<defs>
+      <marker id="kbArrowIn" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="#1f77b4"/>
+      </marker>
+      <marker id="kbArrowOut" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="#999"/>
+      </marker>
+    </defs>` + html;
+
+    svg.innerHTML = html;
+
+    // Status row state
+    const led = document.getElementById("kbLed");
+    const status = document.getElementById("kbStatus");
+    if (isCanary) {
+      led.classList.add("firing");
+      status.textContent = `Canary fired — KL on the ${ringContents} keys in K_ref`;
+    } else {
+      led.classList.remove("firing");
+      status.textContent = "Decoding…";
+    }
+    document.getElementById("kbStep").textContent = state.step;
+    document.getElementById("kbOldest").textContent = `${ringContents} / ${RING_SIZE}`;
+    document.getElementById("kbNewest").textContent = state.step === 0 ? "—" : `decode tok ${state.step - 1}`;
+  }
+
+  function tick() {
+    // End-of-cycle hold, then restart from empty for another full cycle.
+    if (state.phase === "end") {
+      state.phaseFrames++;
+      if (state.phaseFrames >= END_HOLD) {
+        state.step = 0;
+        state.phase = "decode";
+        state.phaseFrames = 0;
+        rngSeed = (rngSeed ^ 0x9e3779b9) | 0;  // re-seed so cycles aren't identical
+        state.nextFireStep = pickFireStep(0, true);
+      }
+      render();
+      return;
+    }
+    state.phaseFrames++;
+    if (state.phase === "decode") {
+      state.step++;
+      // Reached the end of the decode cycle → hold then loop.
+      if (state.step >= TOTAL_TICKS) {
+        state.phase = "end";
+        state.phaseFrames = 0;
+      } else if (state.step >= state.nextFireStep) {
+        // Scheduled fire — every 16–24 decode ticks, periodically.
+        state.phase = "canary";
+        state.phaseFrames = 0;
+        state.nextFireStep = pickFireStep(state.step, false);
+      }
+    } else if (state.phase === "canary") {
+      if (state.phaseFrames >= CANARY_HOLD) {
+        state.phase = "decode";
+        state.phaseFrames = 0;
+      }
+    }
+    render();
+  }
+
+  render();
+  setInterval(tick, TICK_MS);
+})();
+
+/* =========================================================================
+   PART 1c — Cache stripe animation (forward-only tier changes)
+   Shows a single layer's KV cache as tokens stream in. Each cell is colored
+   by the bit-width the controller was admitting at the moment that token's
+   K was allocated. When the canary fires and the tier changes, the NEW
+   cells coming in switch color but already-stored cells keep their
+   original color — producing a temporally-striped cache. Drives home the
+   "no FP16 originals are needed because we never re-quantize past blocks"
+   point.
+   ========================================================================= */
+(function () {
+  const NUM_CELLS = 140;       // longer timeline so the stripe pattern is richer
+  const TICK_MS = 170;         // faster cadence (matches the K_ref animation)
+  const FULL_HOLD = 8;         // hold at full strip before restarting
+
+  // Three visible layers from a hypothetical 80-layer Llama. Each carries
+  // its own current admit tier and its own canary decisions. Decisions
+  // chosen to show every behaviour (promote / demote / stay) across five
+  // canary firings spread over NUM_CELLS ticks:
+  //   Layer 0  : INT4 → INT4 → INT8 → INT4 → INT2 → INT4
+  //   Layer 1  : INT8 → INT4 → INT4 → INT2 → INT4 → INT2
+  //   Layer 79 : INT4 → INT8 → INT8 → INT8 → INT4 → INT8
+  const LAYERS = [
+    { label: "Layer 0",  initialTier: 4 },
+    { label: "Layer 1",  initialTier: 8 },
+    { label: "Layer 79", initialTier: 4 },
+  ];
+  // Canary fires at these decode steps. Each row is the post-canary tier
+  // for [Layer 0, Layer 1, Layer 79] respectively.
+  const CANARY_TICKS = [20, 48, 75, 100, 125];
+  const CANARY_DECISIONS = [
+    [4, 4, 8],   // L0 stays, L1 demotes 8→4, L79 promotes 4→8
+    [8, 4, 8],   // L0 promotes 4→8, L1 stays, L79 stays
+    [4, 2, 8],   // L0 demotes 8→4, L1 demotes 4→2, L79 stays
+    [2, 4, 4],   // L0 demotes 4→2, L1 promotes 2→4, L79 demotes 8→4
+    [4, 2, 8],   // L0 recovers 2→4, L1 demotes 4→2, L79 promotes 4→8
+  ];
+
+  const tierColors = {2: "#d62728", 4: "#1f77b4", 8: "#ff7f0e"};
+  const tierName   = {2: "INT2", 4: "INT4", 8: "INT8"};
+
+  const state = {
+    step: 0,
+    currentTiers: LAYERS.map(l => l.initialTier),
+    cells: LAYERS.map(() => []),
+    flashFrames: 0,
+    fullFrames: 0,
+    lastChanges: LAYERS.map(() => null),  // {from, to} per layer during flash
+  };
+
+  function render() {
+    const svg = document.getElementById("stripeSvg");
+    if (!svg) return;
+    const W = 1000;
+    const margin = {left: 70, right: 130, top: 36, bottom: 40};
+    const cellAreaW = W - margin.left - margin.right;
+    const cellW = cellAreaW / NUM_CELLS;
+    const stripH = 24;
+    const stripGap = 8;
+    const gapStripH = 22;
+
+    // Compute y positions for each strip (and the "..." gap row).
+    let y = margin.top + 18;  // after strip label
+    const layerYs = [];
+    layerYs.push(y); y += stripH + stripGap;       // Layer 0
+    layerYs.push(y); y += stripH + stripGap;       // Layer 1
+    const gapY = y; y += gapStripH + stripGap;     // [...] gap
+    layerYs.push(y); y += stripH;                   // Layer 79
+    const tickY = y + 4;
+    const totalH = tickY + 26;
+
+    const visibleCells = state.cells[0].length;
+    const isFull = visibleCells >= NUM_CELLS;
+    const oldestTok = Math.max(0, state.step - visibleCells);
+    const rightEdgeX = margin.left + visibleCells * cellW;
+    const flashing = state.flashFrames > 0;
+
+    let html = "";
+
+    // (no top strip label — the cells, layer labels, and right-side
+    // tier badges convey the state without it; the canary banner takes
+    // this position when flashing.)
+
+    // ── Each layer's strip ───────────────────────────────────────────────
+    LAYERS.forEach((layer, layerIdx) => {
+      const stripY = layerYs[layerIdx];
+      const myCells = state.cells[layerIdx];
+
+      // Left-side layer label
+      html += `<text x="${margin.left - 10}" y="${stripY + stripH / 2 + 4}" text-anchor="end" font-family="Inter, sans-serif" font-size="11" fill="#444" font-weight="600">${layer.label}</text>`;
+
+      // Cells colored by their admit-time tier
+      for (let i = 0; i < myCells.length; i++) {
+        const tier = myCells[i];
+        const cx = margin.left + i * cellW;
+        html += `<rect x="${cx + 0.3}" y="${stripY}" width="${cellW - 0.6}" height="${stripH}" fill="${tierColors[tier]}" opacity="0.9" rx="0.6"/>`;
+      }
+
+      // Right-side current-tier badge
+      const tier = state.currentTiers[layerIdx];
+      const badgeX = margin.left + cellAreaW + 8;
+      html += `<rect x="${badgeX}" y="${stripY + 2}" width="46" height="${stripH - 4}" fill="${tierColors[tier]}" rx="2"/>`;
+      html += `<text x="${badgeX + 23}" y="${stripY + stripH / 2 + 4}" text-anchor="middle" font-family="Inter, sans-serif" font-size="10.5" font-weight="700" fill="white">${tierName[tier]}</text>`;
+
+      // Direction arrow next to the badge during flash
+      if (flashing && state.lastChanges[layerIdx]) {
+        const ch = state.lastChanges[layerIdx];
+        let arrowChar, arrowColor;
+        if (ch.to > ch.from)      { arrowChar = "↑"; arrowColor = "#7a5800"; }
+        else if (ch.to < ch.from) { arrowChar = "↓"; arrowColor = "#7a5800"; }
+        else                       { arrowChar = "="; arrowColor = "#999"; }
+        html += `<text x="${badgeX + 58}" y="${stripY + stripH / 2 + 5}" font-family="Inter, sans-serif" font-size="14" font-weight="700" fill="${arrowColor}">${arrowChar}</text>`;
+      }
+    });
+
+    // ── "[...] 77 layers omitted [...]" gap row ─────────────────────────
+    html += `<text x="${margin.left - 10}" y="${gapY + gapStripH / 2 + 4}" text-anchor="end" font-family="Inter, sans-serif" font-size="11" fill="#999" font-style="italic">⋮</text>`;
+    html += `<line x1="${margin.left}" y1="${gapY + gapStripH / 2}" x2="${margin.left + cellAreaW / 2 - 80}" y2="${gapY + gapStripH / 2}" stroke="#ddd" stroke-width="0.8" stroke-dasharray="3 3"/>`;
+    html += `<text x="${margin.left + cellAreaW / 2}" y="${gapY + gapStripH / 2 + 4}" text-anchor="middle" font-family="Inter, sans-serif" font-size="11" fill="#888" font-style="italic">⋮ &nbsp;77 layers omitted &nbsp;⋮</text>`;
+    html += `<line x1="${margin.left + cellAreaW / 2 + 80}" y1="${gapY + gapStripH / 2}" x2="${margin.left + cellAreaW}" y2="${gapY + gapStripH / 2}" stroke="#ddd" stroke-width="0.8" stroke-dasharray="3 3"/>`;
+
+    // ── Token tick marks below the last strip ───────────────────────────
+    for (let i = 0; i <= visibleCells; i += 20) {
+      const cx = margin.left + i * cellW;
+      const tokenN = oldestTok + i;
+      html += `<line x1="${cx}" y1="${tickY}" x2="${cx}" y2="${tickY + 4}" stroke="#bbb" stroke-width="1"/>`;
+      html += `<text x="${cx}" y="${tickY + 16}" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#888">tok ${tokenN}</text>`;
+    }
+    if (visibleCells > 0 && visibleCells % 20 !== 0) {
+      const tokenN = oldestTok + visibleCells;
+      html += `<line x1="${rightEdgeX}" y1="${tickY}" x2="${rightEdgeX}" y2="${tickY + 4}" stroke="#bbb" stroke-width="1"/>`;
+      html += `<text x="${rightEdgeX}" y="${tickY + 16}" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#888">tok ${tokenN}</text>`;
+    }
+
+    // ── Canary-fire summary banner (above strips, replaces previous) ────
+    if (flashing) {
+      const parts = state.lastChanges.map((ch, i) => {
+        if (!ch) return null;
+        let dir;
+        if (ch.to > ch.from)      dir = "↑";
+        else if (ch.to < ch.from) dir = "↓";
+        else                       dir = "=";
+        return `${LAYERS[i].label}: ${tierName[ch.from]} ${dir} ${tierName[ch.to]}`;
+      }).filter(Boolean);
+      const summary = parts.join("  ·  ");
+      html += `<rect x="${margin.left}" y="${margin.top - 4}" width="${cellAreaW}" height="18" fill="#f4c542" opacity="0.22" rx="3"/>`;
+      html += `<text x="${margin.left + cellAreaW / 2}" y="${margin.top + 8}" text-anchor="middle" font-family="Inter, sans-serif" font-size="11" font-weight="700" fill="#7a5800">canary fired →  ${summary}</text>`;
+    }
+
+    svg.setAttribute("viewBox", `0 0 ${W} ${totalH}`);
+    svg.innerHTML = html;
+
+    // Status row
+    const led = document.getElementById("stripeLed");
+    const status = document.getElementById("stripeStatus");
+    if (flashing) {
+      led.classList.add("firing");
+      status.textContent = "Canary fired — per-layer tier update";
+    } else {
+      led.classList.remove("firing");
+      status.textContent = "Decoding…";
+    }
+    document.getElementById("stripeStep").textContent = state.step;
+    // Each layer's tier is rendered as a small colored chip whose
+    // background matches the cell-strip color for that tier, so the
+    // status line reads as "L0: [blue INT4] · L1: [orange INT8] · …"
+    const tierSummary = LAYERS.map((l, i) => {
+      const tier = state.currentTiers[i];
+      const layerShort = l.label.replace("Layer ", "L");
+      const color = tierColors[tier];
+      return `${layerShort}: <span style="display:inline-block;padding:1px 7px;background:${color};color:white;border-radius:3px;font-size:11.5px;font-weight:700;font-family:Inter,sans-serif;letter-spacing:0.02em;">${tierName[tier]}</span>`;
+    }).join("&nbsp;&nbsp;·&nbsp;&nbsp;");
+    document.getElementById("stripeTier").innerHTML = tierSummary;
+  }
+
+  function tick() {
+    // Hold at full, then restart from empty for all layers.
+    if (state.fullFrames > 0) {
+      state.fullFrames--;
+      if (state.fullFrames === 0) {
+        state.step = 0;
+        state.currentTiers = LAYERS.map(l => l.initialTier);
+        state.cells = LAYERS.map(() => []);
+        state.flashFrames = 0;
+        state.lastChanges = LAYERS.map(() => null);
+      }
+      render();
+      return;
+    }
+
+    // Advance step + push a new cell per layer at that layer's current tier.
+    state.step++;
+    LAYERS.forEach((_, i) => state.cells[i].push(state.currentTiers[i]));
+
+    // Check canary schedule
+    const canaryIdx = CANARY_TICKS.indexOf(state.step);
+    if (canaryIdx >= 0) {
+      const newTiers = CANARY_DECISIONS[canaryIdx];
+      state.lastChanges = LAYERS.map((_, i) => ({
+        from: state.currentTiers[i],
+        to:   newTiers[i],
+      }));
+      state.currentTiers = newTiers.slice();
+      state.flashFrames = 5;
+    } else if (state.flashFrames > 0) {
+      state.flashFrames--;
+      if (state.flashFrames === 0) {
+        state.lastChanges = LAYERS.map(() => null);
+      }
+    }
+
+    // Once any layer's strip is full, hold then restart all together.
+    if (state.cells[0].length >= NUM_CELLS) {
+      state.fullFrames = FULL_HOLD;
+    }
+
+    render();
+  }
+
+  render();
+  setInterval(tick, TICK_MS);
+})();
+
+/* =========================================================================
+   PART 2 — Results charts (Plotly)
+   ========================================================================= */
+(function () {
+  const TIER_COLORS = {fp16: "#444", int4: "#1f77b4", int8: "#ff7f0e", echokv: "#2ca02c"};
+  const LABEL = {fp16: "FP16 (16 bits)", int4: "static INT4 (4 bits)", int8: "static INT8 (8 bits)", echokv: "EchoKV-3C (adaptive)"};
+
+  function workloadOrder() { return ["gsm8k_hard", "hotpotqa", "ruler_128k", "taubench_airline", "taubench_retail"]; }
+
+  let activeWorkload = "gsm8k_hard";
+
+  // Tabs
+  const tabs = document.getElementById("resultsTabs");
+  workloadOrder().forEach(k => {
+    const btn = document.createElement("button");
+    btn.textContent = DATA[k].label;
+    if (k === activeWorkload) btn.classList.add("active");
+    btn.addEventListener("click", () => {
+      activeWorkload = k;
+      Array.from(tabs.children).forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      drawResults();
+    });
+    tabs.appendChild(btn);
+  });
+
+  function drawResults() {
+    const w = DATA[activeWorkload];
+    const cfgs = ["fp16", "int4", "int8", "echokv"];
+    const cfgBits = {fp16: 16, int4: 4, int8: 8}; // static substrates
+    const symbols = {fp16: "diamond", int4: "circle", int8: "square", echokv: "star"};
+
+    // Per-substrate aggregates across the 3 seeds — both axes carry a
+    // min↔max range. Static substrates have a fixed bit-width across
+    // seeds (so their x-range is zero); EchoKV's bit budget can drift
+    // (e.g. GSM8K-Hard 5.10 → 7.35), which the x error bar makes visible.
+    const points = cfgs.map(c => ({
+      c,
+      bits_mean: c === "echokv" ? w.means.bits           : cfgBits[c],
+      bits_min:  c === "echokv" ? Math.min(...w.seeds.map(s => s.bits)) : cfgBits[c],
+      bits_max:  c === "echokv" ? Math.max(...w.seeds.map(s => s.bits)) : cfgBits[c],
+      acc_mean:  w.means[c],
+      acc_min:   Math.min(...w.seeds.map(s => s[c])),
+      acc_max:   Math.max(...w.seeds.map(s => s[c]))
+    })).sort((a, b) => a.bits_mean - b.bits_mean); // left = less memory
+
+    // Single trace: line connecting the 4 substrates left→right by bits,
+    // with per-point colored markers, asymmetric error bars on BOTH axes.
+    const lineTrace = {
+      x: points.map(p => p.bits_mean),
+      y: points.map(p => p.acc_mean),
+      mode: "lines+markers",
+      type: "scatter",
+      name: "mean across 3 seeds",
+      line: {color: "#aaa", width: 1.5, dash: "dot"},
+      marker: {
+        color:  points.map(p => TIER_COLORS[p.c]),
+        symbol: points.map(p => symbols[p.c]),
+        size:   points.map(p => p.c === "echokv" ? 18 : 13),
+        line: {width: 1.8, color: "white"}
+      },
+      error_y: {
+        type: "data", symmetric: false,
+        array:      points.map(p => p.acc_max - p.acc_mean),
+        arrayminus: points.map(p => p.acc_mean - p.acc_min),
+        color: "#222", thickness: 1.4, width: 6
+      },
+      error_x: {
+        type: "data", symmetric: false,
+        array:      points.map(p => p.bits_max - p.bits_mean),
+        arrayminus: points.map(p => p.bits_mean - p.bits_min),
+        color: "#222", thickness: 1.4, width: 6
+      },
+      hovertemplate:
+        "<b>%{customdata[0]}</b><br>" +
+        "accuracy: %{y:.4f}  (range %{customdata[3]:.3f}–%{customdata[4]:.3f})<br>" +
+        "bits/element: %{x:.2f}  (range %{customdata[1]:.2f}–%{customdata[2]:.2f})" +
+        "<extra></extra>",
+      customdata: points.map(p => [LABEL[p.c], p.bits_min, p.bits_max, p.acc_min, p.acc_max]),
+      showlegend: false
+    };
+
+    // Per-seed dots overlaid — for EchoKV each seed has its own (bits, acc),
+    // so the cloud shows how far the controller drifts across seeds.
+    const seedDots = {
+      x: w.seeds.flatMap(s => cfgs.map(c => c === "echokv" ? s.bits : cfgBits[c])),
+      y: w.seeds.flatMap(s => cfgs.map(c => s[c])),
+      mode: "markers",
+      type: "scatter",
+      marker: {color: "#000", size: 5, opacity: 0.55, line: {color: "white", width: 0.8}},
+      hovertemplate: "bits: %{x:.2f}<br>seed accuracy: %{y:.4f}<extra></extra>",
+      showlegend: false
+    };
+
+    // Inline per-marker label ("FP16", "INT4", ...) near each point so
+    // readers don't need a separate legend to know which symbol is which.
+    // Labels flip BELOW the marker when accuracy is near the top of the
+    // y-range (RULER's all-1.000 case) so they aren't clipped above y=1.
+    // When two adjacent points share the same bits (e.g. RULER's EchoKV
+    // at 3.98 vs INT4 at 4.00), the second label gets an extra vertical
+    // offset so they don't overlap.
+    const labelAnnotations = points.map((p, i) => {
+      const goesBelow = p.acc_mean > 0.85;
+      const baseShift = goesBelow ? -22 : 22;
+      const anchor    = goesBelow ? "top" : "bottom";
+
+      // Stagger if a previous point is within 0.6 bits in x AND within
+      // 0.05 accuracy in y (i.e. effectively the same point on screen).
+      let stagger = 0;
+      for (let j = 0; j < i; j++) {
+        if (Math.abs(points[j].bits_mean - p.bits_mean) < 0.6 &&
+            Math.abs(points[j].acc_mean  - p.acc_mean ) < 0.05) {
+          stagger += goesBelow ? -16 : 16;
+        }
+      }
+
+      return {
+        xref: "x", yref: "y",
+        x: p.bits_mean,
+        y: p.acc_mean,
+        yshift: baseShift + stagger,
+        xanchor: "center", yanchor: anchor,
+        text: p.c === "fp16"   ? "FP16"
+            : p.c === "int4"   ? "INT4"
+            : p.c === "int8"   ? "INT8"
+            : "EchoKV-3C",
+        showarrow: false,
+        font: {size: 11, family: "Inter, sans-serif", color: TIER_COLORS[p.c]}
+      };
+    });
+
+    Plotly.newPlot("resultsChart", [lineTrace, seedDots], {
+      title: { text: w.label + " — accuracy vs. bits/element", font: {size: 15, family: "Inter, sans-serif"}, x: 0 },
+      xaxis: {
+        title: "average bits per element (left = less memory)",
+        range: [3, 17],
+        dtick: 2,
+        gridcolor: "#eee",
+        zeroline: false
+      },
+      yaxis: {
+        // Extend above 1.0 so RULER's all-1.000 markers (size 13-18px)
+        // and their flipped-below labels have headroom and don't clip
+        // against the top edge of the plot.
+        title: "accuracy (3-seed mean)",
+        range: [0, 1.08],
+        dtick: 0.2,
+        gridcolor: "#eee"
+      },
+      // Bigger bottom margin to host the "vertical bars / horizontal bars"
+      // explainer below the plot area, well clear of any data point.
+      margin: {l: 70, r: 30, t: 50, b: 95},
+      paper_bgcolor: "white",
+      plot_bgcolor: "white",
+      font: { family: "Inter, sans-serif", size: 12, color: "#333" },
+      showlegend: false,
+      annotations: [
+        ...labelAnnotations,
+        // Caption moved OUTSIDE the plot area (paper y < 0) so it never
+        // overlaps with RULER's all-1.000 markers or the FP16 point near
+        // the top-right corner.
+        {xref: "paper", yref: "paper", x: 1, y: -0.24, xanchor: "right", yanchor: "top",
+         text: "vertical bars: accuracy range across 3 seeds &nbsp;•&nbsp; horizontal bars: bit-budget range",
+         showarrow: false, font: {size: 11, color: "#666"}}
+      ]
+    }, {displaylogo: false, responsive: true, modeBarButtonsToRemove: ["lasso2d","select2d","autoScale2d"]});
+
+    document.getElementById("resultsCaption").textContent = WORKLOAD_NOTES[activeWorkload];
+  }
+
+  // Summary table
+  function fillTable() {
+    const tbody = document.getElementById("summaryTableBody");
+    let html = "";
+    for (const k of workloadOrder()) {
+      const w = DATA[k];
+      const echokvDescr = (() => {
+        const t = w.seeds[0].tier;
+        const bits = w.means.bits;
+        if (bits < 4.2) return "stays ~INT4 (very compressed)";
+        if (bits < 5.5) return "mostly INT4, some INT8";
+        if (bits < 6.5) return "mixed INT4/INT8";
+        return "cascades to ~INT8";
+      })();
+      html += `<tr${k === "ruler_128k" || k === "taubench_retail" ? " class='highlight'" : ""}>` +
+        `<td>${w.label.split(" (")[0]}</td>` +
+        `<td class="num">${w.means.fp16.toFixed(3)}</td>` +
+        `<td class="num">${w.means.int4.toFixed(3)}</td>` +
+        `<td class="num">${w.means.int8.toFixed(3)}</td>` +
+        `<td class="num">${w.means.echokv.toFixed(3)}</td>` +
+        `<td class="num">${w.means.bits.toFixed(2)}</td>` +
+        `<td>${echokvDescr}</td>` +
+      `</tr>`;
+    }
+    tbody.innerHTML = html;
+  }
+
+  // Pareto: x = avg bits, each workload at its own y-strip (no accuracy axis).
+  // One line per workload, markers sorted by x so the line doesn't zig-zag.
+  function drawPareto() {
+    const traces = [];
+    const workloadColor = {
+      gsm8k_hard: "#a30000",
+      hotpotqa:   "#005b96",
+      ruler_128k: "#008060",
+      taubench_airline: "#cc7700",
+      taubench_retail:  "#7700cc"
+    };
+    const cfgBits = {fp16: 16, int4: 4, int8: 8};
+    const symbols = {fp16: "diamond", int4: "circle", int8: "square", echokv: "star"};
+    const order = workloadOrder();
+
+    order.forEach((k, idx) => {
+      const w = DATA[k];
+      // Build per-config markers, then SORT by x so the connecting line is monotone left→right
+      const points = ["fp16", "int4", "int8", "echokv"].map(c => ({
+        c, x: c === "echokv" ? w.means.bits : cfgBits[c], y: idx,
+        acc: w.means[c], symbol: symbols[c], size: c === "echokv" ? 17 : 11
+      })).sort((a, b) => a.x - b.x);
+
+      traces.push({
+        x: points.map(p => p.x),
+        y: points.map(p => p.y),
+        mode: "markers+lines",
+        name: w.label.split(" (")[0],
+        marker: {
+          color: workloadColor[k],
+          size: points.map(p => p.size),
+          symbol: points.map(p => p.symbol),
+          line: {width: 1.5, color: "white"}
+        },
+        line: {color: workloadColor[k], width: 2},
+        text: points.map(p => `<b>${LABEL[p.c]}</b><br>${w.label}<br>mean accuracy: ${p.acc.toFixed(4)}<br>avg bits: ${p.x.toFixed(2)}`),
+        hovertemplate: "%{text}<extra></extra>"
+      });
+    });
+
+    // Per-workload right-side annotation: "EchoKV: X.XX bits".
+    // Placed OUTSIDE the plot area (xref="paper", x>1) so it never sits
+    // on top of the data points. yref="y" keeps each label aligned with
+    // its workload row. Colored to match the workload's line.
+    const rowLabels = order.map((k, idx) => ({
+      xref: "paper", yref: "y",
+      x: 1.02, y: idx,
+      xanchor: "left", yanchor: "middle",
+      text: `<b>EchoKV: ${DATA[k].means.bits.toFixed(2)} bits</b>`,
+      showarrow: false,
+      font: {size: 11.5, family: "Inter, sans-serif", color: workloadColor[k]}
+    }));
+
+    Plotly.newPlot("paretoChart", traces, {
+      title: { text: "Each workload as one row — markers sorted by bits, left = less memory", font: {size: 14, family: "Inter, sans-serif"}, x: 0 },
+      xaxis: { title: "average bits per element", range: [3.0, 17], gridcolor: "#eee", autorange: false, dtick: 2 },
+      yaxis: {
+        showgrid: false, zeroline: false, showticklabels: true,
+        tickmode: "array",
+        tickvals: order.map((_, i) => i),
+        ticktext: order.map(k => DATA[k].label.split(" (")[0]),
+        tickfont: {size: 12},
+        range: [-0.6, order.length - 0.4],
+        autorange: false
+      },
+      margin: {l: 140, r: 150, t: 50, b: 130},
+      height: 380,
+      paper_bgcolor: "white",
+      plot_bgcolor: "white",
+      font: { family: "Inter, sans-serif", size: 12, color: "#333" },
+      legend: {
+        orientation: "h",
+        x: 0.5, xanchor: "center",
+        y: -0.35, yanchor: "top",
+        bgcolor: "rgba(255,255,255,0.95)",
+        bordercolor: "#ccc",
+        borderwidth: 1
+      },
+      annotations: [
+        ...rowLabels,
+        {xref: "paper", yref: "paper", x: 0, y: -0.20, xanchor: "left", yanchor: "top",
+         text: "● INT4  ■ INT8  ◆ FP16  ★ EchoKV-3C", showarrow: false,
+         font: {size: 12, family: "Inter, sans-serif", color: "#555"}}
+      ]
+    }, {displaylogo: false, responsive: true, modeBarButtonsToRemove: ["lasso2d","select2d","autoScale2d"]});
+  }
+
+  // =========================================================================
+  // Real per-layer tier vector strips
+  // Layout: each workload is a labelled group with 3 seed-rows underneath.
+  //   [Workload name]                                                       (header row)
+  //     seed 0 │ ████████ 80 cells ████████ │ X.XX bits • {INT2:_, INT4:_, INT8:_}
+  //     seed 1 │ ████████ 80 cells ████████ │ X.XX bits • {…}
+  //     seed 2 │ ████████ 80 cells ████████ │ X.XX bits • {…}
+  // Right-side annotation gets its own reserved column so it never overlaps
+  // the cell strip. Workload names go on their own line above the 3 rows so
+  // they never overlap the seed labels.
+  // =========================================================================
+  function drawTierVectors() {
+    const svg = document.getElementById("tierVectorsSvg");
+    if (!svg) return;
+    const W = 1000;
+    const tierColors = {2: "#d62728", 4: "#1f77b4", 8: "#ff7f0e"};
+
+    const margin   = {left: 18, right: 18, top: 12, bottom: 30};
+    const labelCol = 90;   // "seed 0" gutter on the left of each strip
+    const annoCol  = 290;  // right-side column for "X.XX bits • {INT2:_, INT4:_, INT8:_}"
+                            // — needs room for the longest format string at ~40
+                            // monospace chars (e.g. "5.55 bits  •  {INT2:0, INT4:65, INT8:15}").
+    const NUM_LAYERS = 80;
+
+    const cellAreaX = margin.left + labelCol;
+    const cellAreaW = W - margin.left - margin.right - labelCol - annoCol;
+    const cellW = cellAreaW / NUM_LAYERS;
+    const annoX = cellAreaX + cellAreaW + 12;
+
+    const workloads = ["gsm8k_hard", "hotpotqa", "ruler_128k", "taubench_airline", "taubench_retail"];
+    const labels = {
+      gsm8k_hard: "GSM8K-Hard",
+      hotpotqa:   "HotpotQA",
+      ruler_128k: "RULER@128K",
+      taubench_airline: "τ-bench airline",
+      taubench_retail:  "τ-bench retail"
+    };
+
+    const headerH = 18;
+    const stripH = 22;
+    const seedGap = 3;
+    const wlGap = 14;
+
+    let html = "";
+    let y = margin.top;
+
+    for (const wl of workloads) {
+      // ── workload header row (its own line, never overlaps seed labels) ──
+      html += `<text x="${margin.left}" y="${y + headerH - 4}" text-anchor="start"
+                font-family="Inter, sans-serif" font-size="13" font-weight="700" fill="#1a1a1a">${labels[wl]}</text>`;
+      // subtle separator line under the header, only over the cell area
+      html += `<line x1="${cellAreaX}" y1="${y + headerH - 1}" x2="${cellAreaX + cellAreaW}" y2="${y + headerH - 1}"
+                stroke="#e4e4e4" stroke-width="1"/>`;
+      y += headerH + 2;
+
+      const seeds = TIER_VECTORS[wl];
+      for (let s = 0; s < seeds.length; s++) {
+        const tv = seeds[s];
+        const counts = {2: 0, 4: 0, 8: 0};
+        for (const t of tv) counts[t]++;
+        const avgBits = (counts[2] * 2 + counts[4] * 4 + counts[8] * 8) / NUM_LAYERS;
+
+        // seed label (left gutter)
+        html += `<text x="${cellAreaX - 8}" y="${y + stripH / 2 + 4}" text-anchor="end"
+                  font-family="Inter, sans-serif" font-size="11" fill="#888">seed ${s}</text>`;
+
+        // 80 cells (the strip itself). data-* attributes feed the
+        // mouseover tooltip below.
+        for (let l = 0; l < NUM_LAYERS; l++) {
+          const cx = cellAreaX + l * cellW;
+          const tier = tv[l] || 4;
+          html += `<rect class="tv-cell" x="${cx + 0.4}" y="${y}" width="${cellW - 0.8}" height="${stripH}"
+                    fill="${tierColors[tier]}" opacity="0.92" rx="0.5"
+                    data-workload="${labels[wl]}" data-seed="${s}" data-layer="${l}" data-tier="${tier}"
+                    style="cursor: pointer;"/>`;
+        }
+
+        // avg-bits annotation in its OWN column (no longer overlaps cells)
+        html += `<text x="${annoX}" y="${y + stripH / 2 + 4}" text-anchor="start"
+                  font-family="JetBrains Mono, monospace" font-size="10.5" fill="#444">${avgBits.toFixed(2)} bits  •  {INT2:${counts[2]}, INT4:${counts[4]}, INT8:${counts[8]}}</text>`;
+
+        y += stripH + seedGap;
+      }
+      y += wlGap - seedGap; // replace the last seedGap with the larger wlGap
+    }
+
+    // layer-axis along the bottom of the strip column
+    const ay = y + 6;
+    html += `<line x1="${cellAreaX}" y1="${ay}" x2="${cellAreaX + cellAreaW}" y2="${ay}"
+              stroke="#bbb" stroke-width="1"/>`;
+    for (let l = 0; l <= NUM_LAYERS; l += 10) {
+      const cx = cellAreaX + l * cellW;
+      html += `<line x1="${cx}" y1="${ay}" x2="${cx}" y2="${ay + 3}" stroke="#bbb"/>`;
+      html += `<text x="${cx}" y="${ay + 16}" text-anchor="middle"
+                font-family="Inter, sans-serif" font-size="10.5" fill="#777">L${l}</text>`;
+    }
+
+    svg.setAttribute("viewBox", `0 0 ${W} ${ay + 28}`);
+    svg.innerHTML = html;
+
+    // Wire up the floating tooltip so hovering a cell shows
+    // "{Workload} • seed N • layer L • INT{tier}"
+    const tooltip = document.getElementById("tierVectorTooltip");
+    const container = svg.parentElement;
+    svg.addEventListener("mousemove", (e) => {
+      const t = e.target;
+      if (t && t.classList && t.classList.contains("tv-cell")) {
+        const wl = t.getAttribute("data-workload");
+        const sd = t.getAttribute("data-seed");
+        const ly = t.getAttribute("data-layer");
+        const tr = t.getAttribute("data-tier");
+        tooltip.innerHTML = `<strong>${wl}</strong> · seed ${sd} · layer ${ly} · <strong>INT${tr}</strong>`;
+        tooltip.style.display = "block";
+        const rect = container.getBoundingClientRect();
+        const x = e.clientX - rect.left + 14;
+        const y = e.clientY - rect.top + 14;
+        tooltip.style.left = `${x}px`;
+        tooltip.style.top  = `${y}px`;
+      } else {
+        tooltip.style.display = "none";
+      }
+    });
+    svg.addEventListener("mouseleave", () => { tooltip.style.display = "none"; });
+  }
+
+  drawResults();
+  fillTable();
+  drawPareto();
+  drawTierVectors();
+})();
+</script>
+
+</body>
+</html>
+
