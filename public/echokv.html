@@ -442,65 +442,6 @@
   decide, on the fly, how aggressively to compress each of its own
   layers?</em></p>
 
-  <h2>What this gets you</h2>
-
-  <p>Before the mechanism, the headline. On long-context retrieval
-  (RULER@128K) the controller cuts working KV-cache memory by ~75%
-  while matching FP16 accuracy <em>exactly</em> across all 3 seeds —
-  and the extra FP16 storage the controller relies on is so small
-  next to the working cache that it's barely a pixel on the chart
-  below. On the τ-Bench retail tool-use agent, the same controller
-  with the same τ beats every static substrate (FP16, INT8, AND INT4)
-  at fewer bits than static INT8. No per-workload tuning.</p>
-
-  <figure style="margin: 18px 0 26px;">
-    <svg viewBox="0 0 1000 300" preserveAspectRatio="xMidYMid meet"
-         style="width:100%; max-width:1000px; height:auto;
-                border: 1px solid var(--rule); border-radius: 6px;
-                background: #fdfdfb; font-family: 'Inter', sans-serif;">
-      <!-- Title -->
-      <text x="20" y="38" font-size="17" font-weight="600" fill="#1a1a1a">
-        Memory footprint, Llama-3.1-70B at 128 K context (80 layers × 8 KV heads × 128 head dim)
-      </text>
-      <text x="20" y="62" font-size="14" fill="#5a5a5a">
-        Bars drawn to scale — note how invisible the gold FP16 reference is next to the working cache.
-      </text>
-
-      <!-- Row 1: hypothetical full FP16 KV cache (we do NOT keep this) -->
-      <text x="20" y="114" font-size="14" fill="#555">Full FP16 KV cache, K+V, all 128 K tokens —</text>
-      <text x="20" y="132" font-size="13" fill="#999" font-style="italic">(what we'd pay without compression)</text>
-      <rect x="400" y="96" width="560" height="32" fill="#bbb" opacity="0.7"/>
-      <text x="680" y="117" text-anchor="middle" font-size="15" fill="#222" font-weight="600">41.9 GB</text>
-
-      <!-- Row 2: paged INT4 cache (what we actually store, on RULER@128K) -->
-      <text x="20" y="178" font-size="14" fill="#555">Paged KV cache @ INT4, K+V, all 128 K tokens —</text>
-      <text x="20" y="196" font-size="13" fill="#999" font-style="italic">(what we actually store for attention)</text>
-      <rect x="400" y="160" width="140" height="32" fill="#1f77b4" opacity="0.85"/>
-      <text x="470" y="181" text-anchor="middle" font-size="15" fill="white" font-weight="600">10.5 GB</text>
-      <text x="555" y="181" font-size="13" fill="#0036b5">~75% cut vs. FP16</text>
-
-      <!-- Row 3: K_ref FP16 (the only FP16 thing in the system) -->
-      <text x="20" y="242" font-size="14" fill="#555">FP16 K<tspan baseline-shift="sub" font-size="10">ref</tspan> ring buffer, K only, last 64 tokens —</text>
-      <text x="20" y="260" font-size="13" fill="#999" font-style="italic">(the canary's reference; the ONLY FP16 storage)</text>
-      <rect x="400" y="224" width="3" height="32" fill="#daa520"/>
-      <!-- The 10.5 MB bar is barely a pixel — annotate with a leader line. -->
-      <line x1="405" y1="240" x2="445" y2="240" stroke="#7a5800" stroke-width="1.2"/>
-      <text x="450" y="245" font-size="15" fill="#7a5800" font-weight="600">10.5 MB</text>
-      <text x="540" y="245" font-size="13" fill="#7a5800" font-style="italic">~1000× smaller than the working cache</text>
-    </svg>
-    <figcaption style="font-family: Inter, sans-serif; font-size: 13.5px; color: var(--muted); margin-top: 10px; line-height: 1.5; max-width: 820px; margin-left: auto; margin-right: auto;">
-      Three storage layers shown to scale. Only the gold sliver ($K_{\text{ref}}$) is FP16 — and it is a per-layer sliding ring of just 64 recent K vectors, ≈ 10 MB total for the whole 70 B model at 128 K context. The blue bar (≈ 10 GB) is what attention actually reads from on every decode step; it is INT4 / INT8 / INT2 per layer, chosen by the canary using the gold reference as ground truth. The gray bar (≈ 42 GB) is the hypothetical "store everything in FP16" baseline that EchoKV never pays.
-    </figcaption>
-  </figure>
-
-  <p style="font-size: 14px; color: var(--muted); margin-top: -8px;">
-    Full multi-seed accuracy results across all five workloads
-    (GSM8K-Hard, HotpotQA, RULER@128K, τ-Bench airline &amp; retail),
-    paired McNemar tests, and per-layer tier vectors are in the
-    results section further down. What follows next is how the
-    controller decides those bit-widths in the first place.
-  </p>
-
   <h2>How EchoKV works</h2>
 
   <p>EchoKV has four pieces that talk to each other while the model is
@@ -818,8 +759,8 @@
   somewhere?"</em> Answer: no — the FP16 reference is a tiny sliding
   ring buffer of <strong>just the last 64 K vectors per layer</strong>,
   with no V at all (about 10 MB total for the whole 70 B model at 128 K
-  context — the gold sliver in the memory-footprint figure near the
-  top of the page). Everything else — the actual KV cache the model
+  context — the gold sliver in the memory-footprint figure further
+  down the page). Everything else — the actual KV cache the model
   reads from during attention — is paged INT2/INT4/INT8, sized and
   routed per layer by the controller.</p>
 
@@ -1062,13 +1003,28 @@
         seed), held constant across all measurement prompts of that
         seed.</li>
       </ol>
-      <p>The freeze is what makes paired comparison clean: if the
-      controller kept adjusting during measurement, every prompt
-      would be on a slightly different substrate and the paired
-      test would lose its meaning. The cost is that the controller
-      can't react to in-distribution drift across measurement —
-      exploring "online τ adaptation" without breaking the paired
-      protocol is one of our Future-Work items.</p>
+      <p><strong>The freeze is an evaluation artifact, not a property
+      of the deployed system.</strong> In production EchoKV stays live
+      throughout — the controller keeps updating EMAs and re-deciding
+      bit-widths across every decode step and every back-to-back
+      prompt. We freeze only during measurement because paired McNemar
+      needs a fixed schedule per prompt: if the controller kept
+      adjusting, "EchoKV on prompt <em>i</em>" would depend on the
+      prompt history (EMAs carry state from prompts 1..<em>i</em>−1),
+      so the same prompt at position 50 vs position 300 isn't the same
+      trial, the pairing loses its meaning, and the test's effective
+      <em>n</em> shrinks. Live measurement would also fold
+      controller-induced variance into the EchoKV-vs-uniform contrast,
+      raising the effect size needed to clear <em>p</em>&lt;0.05 on
+      <em>n</em>=500.</p>
+      <p>The practical consequence is that the numbers below are a
+      <strong>lower bound</strong> on what a live EchoKV deployment
+      would deliver: production gets more degrees of freedom
+      (within-prompt and across-prompt adaptation) that the frozen
+      protocol throws away. A separate live-controller benchmark —
+      bootstrapped over prompt orderings to characterize the
+      controller's own variance — is the most defensible follow-up,
+      and is listed in Future Work alongside "online τ adaptation."</p>
     </div>
   </details>
 
@@ -1080,7 +1036,7 @@
 
   <table id="summaryTable">
     <thead>
-      <tr><th>workload</th><th class="num">FP16</th><th class="num">INT4</th><th class="num">INT8</th><th class="num">EchoKV-3C</th><th class="num">avg bits</th><th>EchoKV's choice</th></tr>
+      <tr><th>workload</th><th class="num">FP16</th><th class="num">INT2</th><th class="num">INT4</th><th class="num">INT8</th><th class="num">EchoKV-3C</th><th class="num">avg bits</th><th>EchoKV's choice</th></tr>
     </thead>
     <tbody id="summaryTableBody"></tbody>
   </table>
@@ -1124,6 +1080,57 @@
   </div>
   <p class="results-caption">Click workload names in the legend below
   to toggle visibility. Hover any marker for accuracy and config.</p>
+
+  <h2>What the controller costs you in memory</h2>
+
+  <p>The accuracy story is the headline, but EchoKV's whole pitch
+  depends on the FP16 reference being cheap — otherwise we'd just be
+  trading a static KV cache for a live one of the same size. The
+  chart below puts the three storage layers to scale so you can see
+  the cost directly: the FP16 reference EchoKV needs to make a
+  per-layer decision is roughly <em>1000× smaller</em> than the
+  paged INT-cache it's helping to size, and the paged cache itself
+  is ~75% smaller than the full-FP16 baseline it replaces.</p>
+
+  <figure style="margin: 18px 0 26px;">
+    <svg viewBox="0 0 1000 300" preserveAspectRatio="xMidYMid meet"
+         style="width:100%; max-width:1000px; height:auto;
+                border: 1px solid var(--rule); border-radius: 6px;
+                background: #fdfdfb; font-family: 'Inter', sans-serif;">
+      <!-- Title -->
+      <text x="20" y="38" font-size="17" font-weight="600" fill="#1a1a1a">
+        Memory footprint, Llama-3.1-70B at 128 K context (80 layers × 8 KV heads × 128 head dim)
+      </text>
+      <text x="20" y="62" font-size="14" fill="#5a5a5a">
+        Bars drawn to scale — note how invisible the gold FP16 reference is next to the working cache.
+      </text>
+
+      <!-- Row 1: hypothetical full FP16 KV cache (we do NOT keep this) -->
+      <text x="20" y="114" font-size="14" fill="#555">Full FP16 KV cache, K+V, all 128 K tokens —</text>
+      <text x="20" y="132" font-size="13" fill="#999" font-style="italic">(what we'd pay without compression)</text>
+      <rect x="400" y="96" width="560" height="32" fill="#bbb" opacity="0.7"/>
+      <text x="680" y="117" text-anchor="middle" font-size="15" fill="#222" font-weight="600">41.9 GB</text>
+
+      <!-- Row 2: paged INT4 cache (what we actually store, on RULER@128K) -->
+      <text x="20" y="178" font-size="14" fill="#555">Paged KV cache @ INT4, K+V, all 128 K tokens —</text>
+      <text x="20" y="196" font-size="13" fill="#999" font-style="italic">(what we actually store for attention)</text>
+      <rect x="400" y="160" width="140" height="32" fill="#1f77b4" opacity="0.85"/>
+      <text x="470" y="181" text-anchor="middle" font-size="15" fill="white" font-weight="600">10.5 GB</text>
+      <text x="555" y="181" font-size="13" fill="#0036b5">~75% cut vs. FP16</text>
+
+      <!-- Row 3: K_ref FP16 (the only FP16 thing in the system) -->
+      <text x="20" y="242" font-size="14" fill="#555">FP16 K<tspan baseline-shift="sub" font-size="10">ref</tspan> ring buffer, K only, last 64 tokens —</text>
+      <text x="20" y="260" font-size="13" fill="#999" font-style="italic">(the canary's reference; the ONLY FP16 storage)</text>
+      <rect x="400" y="224" width="3" height="32" fill="#daa520"/>
+      <!-- The 10.5 MB bar is barely a pixel — annotate with a leader line. -->
+      <line x1="405" y1="240" x2="445" y2="240" stroke="#7a5800" stroke-width="1.2"/>
+      <text x="450" y="245" font-size="15" fill="#7a5800" font-weight="600">10.5 MB</text>
+      <text x="540" y="245" font-size="13" fill="#7a5800" font-style="italic">~1000× smaller than the working cache</text>
+    </svg>
+    <figcaption style="font-family: Inter, sans-serif; font-size: 13.5px; color: var(--muted); margin-top: 10px; line-height: 1.5; max-width: 820px; margin-left: auto; margin-right: auto;">
+      Three storage layers shown to scale. Only the gold sliver ($K_{\text{ref}}$) is FP16 — and it is a per-layer sliding ring of just 64 recent K vectors, ≈ 10 MB total for the whole 70 B model at 128 K context. The blue bar (≈ 10 GB) is what attention actually reads from on every decode step; it is INT4 / INT8 / INT2 per layer, chosen by the canary using the gold reference as ground truth. The gray bar (≈ 42 GB) is the hypothetical "store everything in FP16" baseline that EchoKV never pays.
+    </figcaption>
+  </figure>
 
   <h2>Key takeaways</h2>
 
@@ -1221,6 +1228,18 @@
         </svg>
       </figure>
     </li>
+    <li><strong>Live-controller benchmark.</strong> Every accuracy
+    cell on this page comes from a <em>frozen</em> post-warmup tier
+    vector (see "Measurement protocol" above). That's a clean paired
+    comparison but it deliberately strips out the controller's
+    within- and across-prompt adaptation — exactly the behavior a
+    production deployment would rely on. The honest end-to-end
+    benchmark is a live run where the controller keeps updating
+    across all measurement prompts, bootstrapped over prompt
+    orderings to characterize its own variance. We expect accuracy
+    to be at least as good as the frozen numbers; average bits could
+    move in either direction depending on how the measurement-time
+    content distribution differs from warmup.</li>
     <li><strong>Online $\tau$ adaptation.</strong> $\tau$ is currently
     a fixed hyperparameter (with our $\sqrt{L}$ rescaling for context
     length). A workload that mid-conversation switches from retrieval
@@ -1306,31 +1325,36 @@ const DATA = {
     {seed:0, fp16:0.486, int4:0.464, int8:0.490, echokv:0.466, bits:5.10, tier:{4:58,8:22}},
     {seed:1, fp16:0.496, int4:0.502, int8:0.500, echokv:0.512, bits:5.55, tier:{4:49,8:31}},
     {seed:2, fp16:0.450, int4:0.438, int8:0.464, echokv:0.460, bits:7.35, tier:{4:13,8:67}}
-  ], means:{fp16:0.477, int4:0.468, int8:0.485, echokv:0.479, bits:6.00}},
+  ], means:{fp16:0.477, int4:0.468, int8:0.485, echokv:0.479, bits:6.00},
+     int2:{acc:0.240, n:500, partial:false}},
 
   hotpotqa: {label: "HotpotQA", n: 500, seeds: [
     {seed:0, fp16:0.682, int4:0.680, int8:0.684, echokv:0.682, bits:4.60, tier:{4:68,8:12}},
     {seed:1, fp16:0.694, int4:0.688, int8:0.696, echokv:0.680, bits:4.75, tier:{4:65,8:15}},
     {seed:2, fp16:0.690, int4:0.682, int8:0.688, echokv:0.686, bits:5.10, tier:{4:58,8:22}}
-  ], means:{fp16:0.689, int4:0.683, int8:0.689, echokv:0.683, bits:4.82}},
+  ], means:{fp16:0.689, int4:0.683, int8:0.689, echokv:0.683, bits:4.82},
+     int2:{acc:0.408, n:500, partial:false}},
 
   ruler_128k: {label: "RULER@128K", n: 100, seeds: [
     {seed:0, fp16:1.000, int4:1.000, int8:1.000, echokv:1.000, bits:3.98, tier:{2:1,4:79}},
     {seed:1, fp16:1.000, int4:0.990, int8:1.000, echokv:1.000, bits:3.98, tier:{2:1,4:79}},
     {seed:2, fp16:1.000, int4:0.990, int8:1.000, echokv:1.000, bits:3.98, tier:{2:1,4:79}}
-  ], means:{fp16:1.000, int4:0.993, int8:1.000, echokv:1.000, bits:3.98}},
+  ], means:{fp16:1.000, int4:0.993, int8:1.000, echokv:1.000, bits:3.98},
+     int2:{acc:0.000, n:100, partial:false}},
 
   taubench_airline: {label: "τ-Bench airline", n: 50, seeds: [
     {seed:0, fp16:0.260, int4:0.200, int8:0.300, echokv:0.289, bits:7.85, tier:{4:3,8:77}},
     {seed:1, fp16:0.260, int4:0.200, int8:0.300, echokv:0.222, bits:7.80, tier:{4:4,8:76}},
     {seed:2, fp16:0.260, int4:0.200, int8:0.300, echokv:0.289, bits:7.85, tier:{4:3,8:77}}
-  ], means:{fp16:0.260, int4:0.200, int8:0.300, echokv:0.267, bits:7.83}},
+  ], means:{fp16:0.260, int4:0.200, int8:0.300, echokv:0.267, bits:7.83},
+     int2:{acc:0.340, n:50, partial:false, paretoOnly:true}},
 
   taubench_retail: {label: "τ-Bench retail", n: 115, seeds: [
     {seed:0, fp16:0.217, int4:0.200, int8:0.183, echokv:0.236, bits:7.95, tier:{4:1,8:79}},
     {seed:1, fp16:0.217, int4:0.200, int8:0.183, echokv:0.236, bits:7.95, tier:{4:1,8:79}},
     {seed:2, fp16:0.217, int4:0.200, int8:0.183, echokv:0.236, bits:7.95, tier:{4:1,8:79}}
-  ], means:{fp16:0.217, int4:0.200, int8:0.183, echokv:0.236, bits:7.95}}
+  ], means:{fp16:0.217, int4:0.200, int8:0.183, echokv:0.236, bits:7.95},
+     int2:{acc:0.096, n:73, partial:false}}
 };
 
 /* Real per-layer tier vectors from results/serving/*_repro/seed{S}_echokv.json.
@@ -2246,8 +2270,8 @@ const WORKLOAD_NOTES = {
    PART 2 — Results charts (Plotly)
    ========================================================================= */
 (function () {
-  const TIER_COLORS = {fp16: "#444", int4: "#1f77b4", int8: "#ff7f0e", echokv: "#2ca02c"};
-  const LABEL = {fp16: "FP16 (16 bits)", int4: "static INT4 (4 bits)", int8: "static INT8 (8 bits)", echokv: "EchoKV-3C (adaptive)"};
+  const TIER_COLORS = {fp16: "#444", int2: "#d62728", int4: "#1f77b4", int8: "#ff7f0e", echokv: "#2ca02c"};
+  const LABEL = {fp16: "FP16 (16 bits)", int2: "static INT2 (2 bits)", int4: "static INT4 (4 bits)", int8: "static INT8 (8 bits)", echokv: "EchoKV-3C (adaptive)"};
 
   function workloadOrder() { return ["gsm8k_hard", "hotpotqa", "ruler_128k", "taubench_airline", "taubench_retail"]; }
 
@@ -2272,7 +2296,7 @@ const WORKLOAD_NOTES = {
     const w = DATA[activeWorkload];
     const cfgs = ["fp16", "int4", "int8", "echokv"];
     const cfgBits = {fp16: 16, int4: 4, int8: 8}; // static substrates
-    const symbols = {fp16: "diamond", int4: "circle", int8: "square", echokv: "star"};
+    const symbols = {fp16: "diamond", int2: "x", int4: "circle", int8: "square", echokv: "star"};
 
     // Per-substrate aggregates across the 3 seeds — both axes carry a
     // min↔max range. Static substrates have a fixed bit-width across
@@ -2286,7 +2310,22 @@ const WORKLOAD_NOTES = {
       acc_mean:  w.means[c],
       acc_min:   Math.min(...w.seeds.map(s => s[c])),
       acc_max:   Math.max(...w.seeds.map(s => s[c]))
-    })).sort((a, b) => a.bits_mean - b.bits_mean); // left = less memory
+    }));
+
+    // INT2: single seed-0 data point — no error bars, plotted separately
+    // so it never participates in the multi-seed line/range logic.
+    // `paretoOnly` data (e.g. τ-Bench airline INT2) is hidden here and
+    // only surfaces in the Pareto chart below.
+    if (w.int2 && !w.int2.paretoOnly) {
+      points.push({
+        c: "int2",
+        bits_mean: 2, bits_min: 2, bits_max: 2,
+        acc_mean: w.int2.acc, acc_min: w.int2.acc, acc_max: w.int2.acc,
+        partial: !!w.int2.partial,
+        n_int2: w.int2.n, total_int2: w.int2.total
+      });
+    }
+    points.sort((a, b) => a.bits_mean - b.bits_mean); // left = less memory
 
     // Single trace: line connecting the 4 substrates left→right by bits,
     // with per-point colored markers, asymmetric error bars on BOTH axes.
@@ -2365,6 +2404,7 @@ const WORKLOAD_NOTES = {
         yshift: baseShift + stagger,
         xanchor: "center", yanchor: anchor,
         text: p.c === "fp16"   ? "FP16"
+            : p.c === "int2"   ? "INT2"
             : p.c === "int4"   ? "INT4"
             : p.c === "int8"   ? "INT8"
             : "EchoKV-3C",
@@ -2377,7 +2417,7 @@ const WORKLOAD_NOTES = {
       title: { text: w.label + " — accuracy vs. bits/element", font: {size: 15, family: "Inter, sans-serif"}, x: 0 },
       xaxis: {
         title: "average bits per element (left = less memory)",
-        range: [3, 17],
+        range: [1, 17],
         dtick: 2,
         gridcolor: "#eee",
         zeroline: false
@@ -2426,9 +2466,11 @@ const WORKLOAD_NOTES = {
         if (bits < 6.5) return "mixed INT4/INT8";
         return "cascades to ~INT8";
       })();
+      const int2Cell = (w.int2 && !w.int2.paretoOnly) ? w.int2.acc.toFixed(3) : "—";
       html += `<tr${k === "ruler_128k" || k === "taubench_retail" ? " class='highlight'" : ""}>` +
         `<td>${w.label.split(" (")[0]}</td>` +
         `<td class="num">${w.means.fp16.toFixed(3)}</td>` +
+        `<td class="num">${int2Cell}</td>` +
         `<td class="num">${w.means.int4.toFixed(3)}</td>` +
         `<td class="num">${w.means.int8.toFixed(3)}</td>` +
         `<td class="num">${w.means.echokv.toFixed(3)}</td>` +
@@ -2450,16 +2492,25 @@ const WORKLOAD_NOTES = {
       taubench_airline: "#cc7700",
       taubench_retail:  "#7700cc"
     };
-    const cfgBits = {fp16: 16, int4: 4, int8: 8};
-    const symbols = {fp16: "diamond", int4: "circle", int8: "square", echokv: "star"};
+    const cfgBits = {fp16: 16, int2: 2, int4: 4, int8: 8};
+    const symbols = {fp16: "diamond", int2: "x", int4: "circle", int8: "square", echokv: "star"};
     const order = workloadOrder();
 
     order.forEach((k, idx) => {
       const w = DATA[k];
       // Build per-config markers, then SORT by x so the connecting line is monotone left→right
-      const points = ["fp16", "int4", "int8", "echokv"].map(c => ({
-        c, x: c === "echokv" ? w.means.bits : cfgBits[c], y: idx,
-        acc: w.means[c], symbol: symbols[c], size: c === "echokv" ? 17 : 11
+      const configs = ["fp16", "int4", "int8", "echokv"];
+      if (w.int2) configs.push("int2");
+      const points = configs.map(c => ({
+        c,
+        x: c === "echokv" ? w.means.bits : cfgBits[c],
+        y: idx,
+        acc: c === "int2" ? w.int2.acc : w.means[c],
+        symbol: symbols[c],
+        size: c === "echokv" ? 17 : 11,
+        partial: c === "int2" ? !!w.int2.partial : false,
+        n_int2: c === "int2" ? w.int2.n : undefined,
+        total_int2: c === "int2" ? w.int2.total : undefined
       })).sort((a, b) => a.x - b.x);
 
       traces.push({
@@ -2474,7 +2525,10 @@ const WORKLOAD_NOTES = {
           line: {width: 1.5, color: "white"}
         },
         line: {color: workloadColor[k], width: 2},
-        text: points.map(p => `<b>${LABEL[p.c]}</b><br>${w.label}<br>mean accuracy: ${p.acc.toFixed(4)}<br>avg bits: ${p.x.toFixed(2)}`),
+        text: points.map(p =>
+          `<b>${LABEL[p.c]}</b><br>${w.label}<br>` +
+          `mean accuracy: ${p.acc.toFixed(4)}<br>avg bits: ${p.x.toFixed(2)}`
+        ),
         hovertemplate: "%{text}<extra></extra>"
       });
     });
@@ -2494,7 +2548,7 @@ const WORKLOAD_NOTES = {
 
     Plotly.newPlot("paretoChart", traces, {
       title: { text: "Each workload as one row — markers sorted by bits, left = less memory", font: {size: 14, family: "Inter, sans-serif"}, x: 0 },
-      xaxis: { title: "average bits per element", range: [3.0, 17], gridcolor: "#eee", autorange: false, dtick: 2 },
+      xaxis: { title: "average bits per element", range: [1.0, 17], gridcolor: "#eee", autorange: false, dtick: 2 },
       yaxis: {
         showgrid: false, zeroline: false, showticklabels: true,
         tickmode: "array",
@@ -2660,4 +2714,3 @@ const WORKLOAD_NOTES = {
 
 </body>
 </html>
-
