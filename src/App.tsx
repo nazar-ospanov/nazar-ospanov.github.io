@@ -35,6 +35,11 @@ function App() {
     return <CanvasVulnerability />;
   }
 
+  if (path === '/echokv') {
+    window.location.replace('/echokv.html');
+    return null;
+  }
+
   return (
     <div className="min-h-screen bg-white">
       <Navbar />
