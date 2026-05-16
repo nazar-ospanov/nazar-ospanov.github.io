@@ -108,6 +108,19 @@
   pre.repro code { background: transparent; padding: 0; font-size: inherit; }
   pre.repro .c { color: #6a7a8a; }
 
+  /* Memory-footprint figure — break out of the 820px article width on
+     wider viewports so the bars get more horizontal real estate (the
+     point of this figure is showing 41.9 GB vs 10.5 GB vs 10.5 MB to
+     scale, which benefits from a longer baseline). No background or
+     border — the SVG already has its own. */
+  .memfig-wide { max-width: 100%; }
+  @media (min-width: 1100px) {
+    .memfig-wide { margin-left: -120px; margin-right: -120px; }
+  }
+  @media (min-width: 1400px) {
+    .memfig-wide { margin-left: -240px; margin-right: -240px; }
+  }
+
   /* Mechanism viz — wider than the article body */
   .viz-wrap {
     margin: 32px calc(50% - 50vw + 24px) 32px calc(50% - 50vw + 24px);
@@ -1036,7 +1049,7 @@
 
   <table id="summaryTable">
     <thead>
-      <tr><th>workload</th><th class="num">FP16</th><th class="num">INT2</th><th class="num">INT4</th><th class="num">INT8</th><th class="num">EchoKV-3C</th><th class="num">avg bits</th><th>EchoKV's choice</th></tr>
+      <tr><th>workload</th><th class="num">INT2</th><th class="num">INT4</th><th class="num">INT8</th><th class="num">FP16</th><th class="num">EchoKV</th><th class="num" style="white-space:nowrap;">EchoKV avg bits</th><th>EchoKV's choice</th></tr>
     </thead>
     <tbody id="summaryTableBody"></tbody>
   </table>
@@ -1092,9 +1105,10 @@
   paged INT-cache it's helping to size, and the paged cache itself
   is ~75% smaller than the full-FP16 baseline it replaces.</p>
 
-  <figure style="margin: 18px 0 26px;">
+  <figure class="memfig-wide" style="margin: 18px 0 26px;">
     <svg viewBox="0 0 1000 300" preserveAspectRatio="xMidYMid meet"
-         style="width:100%; max-width:1000px; height:auto;
+         style="width:100%; max-width:1280px; height:auto; display:block;
+                margin: 0 auto;
                 border: 1px solid var(--rule); border-radius: 6px;
                 background: #fdfdfb; font-family: 'Inter', sans-serif;">
       <!-- Title -->
@@ -2469,12 +2483,12 @@ const WORKLOAD_NOTES = {
       const int2Cell = (w.int2 && !w.int2.paretoOnly) ? w.int2.acc.toFixed(3) : "—";
       html += `<tr${k === "ruler_128k" || k === "taubench_retail" ? " class='highlight'" : ""}>` +
         `<td>${w.label.split(" (")[0]}</td>` +
-        `<td class="num">${w.means.fp16.toFixed(3)}</td>` +
         `<td class="num">${int2Cell}</td>` +
         `<td class="num">${w.means.int4.toFixed(3)}</td>` +
         `<td class="num">${w.means.int8.toFixed(3)}</td>` +
+        `<td class="num">${w.means.fp16.toFixed(3)}</td>` +
         `<td class="num">${w.means.echokv.toFixed(3)}</td>` +
-        `<td class="num">${w.means.bits.toFixed(2)}</td>` +
+        `<td class="num" style="white-space:nowrap;">${w.means.bits.toFixed(2)}</td>` +
         `<td>${echokvDescr}</td>` +
       `</tr>`;
     }
