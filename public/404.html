@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Nazar Ospanov</title>
+    <script>
+      // GitHub Pages SPA redirect: preserve the path in sessionStorage,
+      // then redirect to index.html which reads it back.
+      var path = window.location.pathname;
+      sessionStorage.setItem('redirect', path);
+      window.location.replace('/');
+    </script>
+  </head>
+  <body></body>
+</html>
