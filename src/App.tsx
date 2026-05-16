@@ -27,6 +27,13 @@ function normalize(path: string): string {
   return path.replace(/\/+$/, '').toLowerCase() || '/';
 }
 
+function ExternalRedirect({ to }: { to: string }) {
+  useEffect(() => {
+    window.location.replace(to);
+  }, [to]);
+  return null;
+}
+
 function App() {
   const pathname = usePathname();
   const path = normalize(pathname);
@@ -36,8 +43,7 @@ function App() {
   }
 
   if (path === '/echokv') {
-    window.location.replace('/echokv.html');
-    return null;
+    return <ExternalRedirect to="/echokv.html" />;
   }
 
   return (
